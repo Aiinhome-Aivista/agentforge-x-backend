@@ -7,14 +7,7 @@ def create_app():
     app = Flask(__name__)
 
     # ✅ Enable CORS
-    CORS(
-        app,
-        resources={r"/*": {"origins": [
-            "http://localhost:5173",
-            "https://agentforge.services"
-        ]}},
-        supports_credentials=True
-    )
+    CORS(app, resources={r"/*": {"origins": "*"}})
 
     # ✅ Register API routes
     from app.api.routes import api_bp
