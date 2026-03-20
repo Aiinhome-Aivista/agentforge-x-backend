@@ -7,7 +7,7 @@ def create_app():
     app = Flask(__name__)
 
     # ✅ Enable CORS
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    CORS(app)
 
     # ✅ Register API routes
     from app.api.routes import api_bp
