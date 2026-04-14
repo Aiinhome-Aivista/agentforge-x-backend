@@ -7,6 +7,7 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
+from dataclasses import field
 
 
 def _new_key() -> str:
@@ -49,15 +50,26 @@ class ProcessStep:
     step_number: int
     title: str
     description: str
-    actor: str                  # "System" | "Finance team" | "Sales" etc.
-    step_type: str              # "manual" | "system" | "decision" | "approval"
-    automation_potential: float # 0-100
+    actor: str
+    step_type: str
+    automation_potential: float
+    automation_reasoning: str = ""
     _key: str = field(default_factory=_new_key)
+
     inputs: List[str] = field(default_factory=list)
     outputs: List[str] = field(default_factory=list)
     pain_points: List[str] = field(default_factory=list)
     erp_module: Optional[str] = None
     duration_estimate: Optional[str] = None
+
+    # ✅ ADD THESE TWO FIELDS
+    micro_steps: List[Dict[str, Any]] = field(default_factory=list)
+    decisions: List[Dict[str, Any]] = field(default_factory=list)
+
+    # (Optional but recommended for your new pass)
+    decision_type: Optional[str] = None
+    decision_confidence: Optional[float] = None
+    decision_automation_feasibility: Optional[str] = None
 
     def to_doc(self) -> Dict[str, Any]:
         return asdict(self)
@@ -66,7 +78,6 @@ class ProcessStep:
         d = self.to_doc()
         d["id"] = self._key
         return d
-
 
 # ── Automation Suggestion ─────────────────────────────────────────────────────
 
@@ -85,6 +96,8 @@ class AutomationSuggestion:
     _key: str = field(default_factory=_new_key)
     technologies: List[str] = field(default_factory=list)  # ["EDI", "SAP workflow"]
     prerequisites: List[str] = field(default_factory=list)
+    metrics: Dict[str, Any] = field(default_factory=dict)
+    accuracy_reason: str = ""
 
     def to_doc(self) -> Dict[str, Any]:
         return asdict(self)
@@ -136,7 +149,10 @@ class AnalysisResult:
     erp_modules: List[ERPModule]
     key_insights: List[KeyInsight]
     top_automation_targets: List[Dict[str, Any]]
-    graph_url: Optional[str] = None
+    graph_url: Optional[str] = None,
+    toc_analysis: Dict = {},
+    workflow_layers: Dict = {},
+    metrics: Dict[str, Any] = field(default_factory=dict)
 
     def to_api(self) -> Dict[str, Any]:
         return {
@@ -146,5 +162,6 @@ class AnalysisResult:
             "erp_modules": [m.to_api() for m in self.erp_modules],
             "key_insights": [asdict(i) for i in self.key_insights],
             "top_automation_targets": self.top_automation_targets,
-            "graph_url": self.graph_url 
+            "graph_url": self.graph_url,
+            "metrics": self.metrics 
         }

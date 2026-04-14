@@ -7,7 +7,7 @@ import multiprocessing
 
 # ── Binding ───────────────────────────────────────────────────────────────────
 host = os.getenv("FLASK_HOST", "127.0.0.1")   # 127.0.0.1 when behind nginx
-port = os.getenv("FLASK_PORT", "3006")
+port = os.getenv("FLASK_PORT", "3004")
 bind = f"{host}:{port}"
 
 # ── Workers ───────────────────────────────────────────────────────────────────

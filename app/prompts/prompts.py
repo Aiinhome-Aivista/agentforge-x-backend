@@ -10,6 +10,15 @@ Pass 3: Generate agentic suggestions
 import json
 
 
+GLOBAL_CONSTRAINTS = """
+CRITICAL ANALYSIS RULES:
+
+- Always identify hidden micro-processes
+- Always extract decision logic explicitly
+- Never assume linear flow if conditions exist
+- Prefer decomposition over summarization
+"""
+
 SYSTEM_PROCESS_ANALYST = """You are an expert business process analyst and enterprise architect.
 You specialize in analyzing organizational workflows, ERP system data, and process documentation
 to identify automation opportunities and inefficiencies.
@@ -22,6 +31,10 @@ RPA, workflow automation, ERP integrations, and agentic AI systems.
 You analyze business processes and design practical automation solutions.
 
 You always respond with valid JSON only. No markdown, no explanation text outside JSON."""
+
+def safe_json(data):
+    import json
+    return json.dumps(data, indent=2).replace("{", "{{").replace("}", "}}")
 
 
 # ── PASS 1: EXTRACTION ────────────────────────────────────────────────────────
@@ -39,6 +52,16 @@ def build_extraction_prompt(text: str, source_type: str, file_name: str) -> str:
 
 Extract the complete business process described or implied by this data.
 
+IMPORTANT INSTRUCTIONS:
+
+- Break the process into at least 5 to 10 sequential steps
+- Each step MUST be atomic and represent a single action
+- DO NOT combine multiple actions into one step
+- Ensure steps follow a logical execution order
+- Include both system and human actions as separate steps
+- If the document is high-level, infer missing intermediate steps logically
+- Always return multiple steps even if input is short
+
 Return a JSON object with this exact structure:
 {{
   "process_title": "string - clear name for this process",
@@ -48,15 +71,29 @@ Return a JSON object with this exact structure:
   "steps": [
     {{
       "step_number": 1,
-      "title": "string - short step name",
-      "description": "string - what happens in this step",
-      "actor": "string - who/what performs this (System/Sales Team/Finance/Manager/etc)",
-      "step_type": "string - one of: manual|system|decision|approval|notification",
-      "inputs": ["list of inputs/triggers for this step"],
-      "outputs": ["list of outputs/results from this step"],
-      "pain_points": ["list of known inefficiencies or manual effort involved"],
-      "erp_module": "string or null - relevant ERP module if applicable",
-      "duration_estimate": "string or null - typical time e.g. '2-4 hours', '1 day'"
+      "title": "...",
+      "description": "...",
+      "actor": "...",
+      "micro_steps": [
+        {{
+          "micro_step_id": "1.1",
+          "title": "Validate input data",
+          "type": "validation | decision | action",
+          "actor": "system | human",
+          "automation_potential": 80
+        }}
+      ],
+      "decisions": [
+        {{
+          "decision_id": "D1",
+          "question": "Is stock available?",
+          "type": "rule_based | judgment",
+          "branches": [
+            {{"condition": "YES", "next_step": 3}},
+            {{"condition": "NO", "next_step": 5}}
+          ]
+        }}
+      ]
     }}
   ],
   "erp_modules_identified": [
@@ -78,42 +115,8 @@ Return a JSON object with this exact structure:
 
 Document content:
 ---
-{text[:12000]}
+{text[:12000].replace("{", "{{").replace("}", "}}")}
 ---"""
-
-
-# ── PASS 2: AUTOMATION SCORING ────────────────────────────────────────────────
-
-# def build_scoring_prompt(steps: list, process_context: str) -> str:
-#     steps_json = str(steps)[:8000]
-
-#     return f"""You are scoring automation potential for each step of this business process.
-
-# Process context: {process_context}
-
-# For each step provided, score its automation potential and identify the best automation approach.
-
-# Steps to score:
-# {steps_json}
-
-# Return a JSON array — one entry per step in the same order:
-# [
-#   {{
-#     "step_number": 1,
-#     "automation_potential": 85,
-#     "automation_reasoning": "string - why this score",
-#     "primary_automation_type": "string - rpa|ai_agent|workflow|system_integration|none",
-#     "blocking_factors": ["list of what makes it hard to automate"],
-#     "quick_win": true
-#   }}
-# ]
-
-# Scoring guide:
-# - 90-100: Fully automatable today with standard tools
-# - 70-89: Highly automatable with moderate integration effort
-# - 50-69: Partially automatable, some manual oversight needed
-# - 20-49: Low automation potential, human judgment critical
-# - 0-19: Cannot be meaningfully automated"""
 
 
 def build_scoring_prompt(steps: list, process_context: str) -> str:
@@ -130,7 +133,7 @@ def build_scoring_prompt(steps: list, process_context: str) -> str:
         }
         for s in steps
     ]
-    steps_json = json.dumps(slim_steps, ensure_ascii=False)
+    steps_json = safe_json(slim_steps)
 
     return f"""You are scoring automation potential for each step of this business process.
 
@@ -153,6 +156,22 @@ Return a JSON array — one entry per step in the same order:
   }}
 ]
 
+When scoring automation potential, consider:
+
+- Level of human judgment required (low / medium / high)
+- Whether approvals or compliance checks are involved
+- Degree of rule-based vs unstructured decision making
+- Availability of system APIs or structured inputs
+- Exception handling complexity
+
+IMPORTANT:
+- Steps requiring significant human judgment or approvals should have lower automation potential
+- Only assign 90+ when the step is fully system-driven with minimal or no human involvement
+- Do not rely on a single factor; balance all dimensions before assigning the score
+- automation_reasoning MUST explain the score based on these factors
+
+
+
 Scoring guide:
 - 90-100: Fully automatable today with standard tools
 - 70-89: Highly automatable with moderate integration effort
@@ -160,107 +179,77 @@ Scoring guide:
 - 20-49: Low automation potential, human judgment critical
 - 0-19: Cannot be meaningfully automated"""
 
-# ── PASS 3: AGENTIC SUGGESTIONS ───────────────────────────────────────────────
-
-# def build_suggestions_prompt(steps: list, scores: list, process_title: str) -> str:
-#     # Focus on steps with automation_potential >= 50
-#     high_potential = [
-#         {**step, "score_data": next(
-#             (s for s in scores if s.get("step_number") == step.get("step_number")), {}
-#         )}
-#         for step in steps
-#         if any(s.get("step_number") == step.get("step_number")
-#                and s.get("automation_potential", 0) >= 50 for s in scores)
-#     ]
-
-#     return f"""Generate specific agentic automation suggestions for high-potential steps in the "{process_title}" process.
-
-# High-potential steps:
-# {str(high_potential)[:8000]}
-
-# For each step, design a concrete automation solution. Return a JSON array:
-# [
-#   {{
-#     "step_number": 1,
-#     "title": "string - e.g. 'Automate: Invoice Generation'",
-#     "description": "string - 1-2 sentences on what gets automated and how",
-#     "agent_type": "string - one of: system_integration|rpa|ai_agent|workflow_automation|communication_agent",
-#     "implementation": "string - specific technologies/approach e.g. 'SAP workflow trigger + email agent via SendGrid'",
-#     "accuracy_estimate": 95,
-#     "execution_speed": "string - instant|minutes|hours|scheduled",
-#     "effort_level": "string - low|medium|high",
-#     "roi_impact": "string - high|medium|low",
-#     "technologies": ["list of specific technologies e.g. SAP BTP, Python, n8n, Zapier"],
-#     "prerequisites": ["list of prerequisites e.g. 'ERP API access', 'EDI setup with suppliers'"]
-#   }}
-# ]
-
-# Focus on practical, implementable solutions. Be specific about technologies."""
-
-# def build_suggestions_prompt(steps: list, scores: list, process_title: str) -> str:
-#     import json
-#     score_map = {s.get("step_number"): s for s in scores}
-#     enriched = [
-#         {**step, "score_data": score_map.get(step.get("step_number"), {})}
-#         for step in steps
-#     ]
-#     enriched_json = json.dumps(enriched, ensure_ascii=False)
-
-#     return f"""Generate specific agentic automation suggestions for the "{process_title}" process.
-
-# Steps with their automation scores:
-# {enriched_json}
-
-# Generate suggestions for steps with automation_potential >= 50.
-# If all steps scored below 50, generate suggestions for the top 3 highest-scoring steps.
-# Return a JSON array:
-# [
-#   {{
-#     "step_number": 1,
-#     "title": "string - e.g. 'Automate: Invoice Generation'",
-#     "description": "string - 1-2 sentences on what gets automated and how",
-#     "agent_type": "string - one of: system_integration|rpa|ai_agent|workflow_automation|communication_agent",
-#     "implementation": "string - specific technologies/approach",
-#     "accuracy_estimate": 95,
-#     "execution_speed": "string - instant|minutes|hours|scheduled",
-#     "effort_level": "string - low|medium|high",
-#     "roi_impact": "string - high|medium|low",
-#     "technologies": ["list of specific technologies"],
-#     "prerequisites": ["list of prerequisites"]
-#   }}
-# ]"""
-
 
 def build_suggestions_prompt(steps, scores, process_title):
+    import json
+
+    steps_json = json.dumps(steps, indent=2).replace("{", "{{").replace("}", "}}")
+    scores_json = json.dumps(scores, indent=2).replace("{", "{{").replace("}", "}}")
+
     return f"""
 You are an expert in ERP automation and AI transformation.
 
 Process: {process_title}
 
 Steps:
-{json.dumps(steps, indent=2)}
+{steps_json}
 
 Automation Scores:
-{json.dumps(scores, indent=2)}
+{scores_json}
 
 Your task:
-Generate actionable automation suggestions.
+Generate actionable automation suggestions mapped to specific steps.
 
 IMPORTANT:
+- ONLY generate suggestions for steps where step_type is NOT "manual"
+- DO NOT generate suggestions for manual steps
+- Focus on step_type: system, decision, approval, notification
+- Try to cover ALL non-manual steps
+- Prefer high automation_potential steps first
+- Each suggestion MUST include "step_number"
+- step_number MUST match from the given Steps
 - Always return at least 5 suggestions
 - Do NOT return empty list
-- Be specific and practical
 
-Return ONLY valid JSON in this format:
+CRITICAL RULES:
+- Each suggestion MUST have UNIQUE metrics
+- "automation_potential" is MANDATORY inside metrics
+- automation_potential MUST be a number between 0 to 100
+- DO NOT skip metrics for any suggestion
+- Do NOT repeat same metrics
+- Metrics must be step-specific
+
+IMPORTANT:
+- "accuracy_reason" MUST be different from automation_reasoning
+- DO NOT repeat same reasoning
+- Focus on WHY this solution works (technology, ROI, speed, implementation)
+
+metrics format:
+{{
+  "automation_potential": number,
+  "outputs": [
+    "step-specific impact"
+  ]
+}}
+
+Return ONLY valid JSON:
 
 {{
   "suggestions": [
     {{
+      "step_number": 1,
       "title": "Short title",
       "description": "What to automate and how",
       "priority": "high | medium | low",
       "automation_type": "AI | RPA | Workflow | Integration",
-      "expected_impact": "Business impact"
+      "accuracy_reason": "Why this automation solution is effective",
+      "metrics": {{
+        "automation_potential": 75,
+        "outputs": [
+          "50% faster invoice processing"
+        ]
+      }},
+      "roi_impact": "high | medium | low"
     }}
   ]
 }}
@@ -275,10 +264,35 @@ def build_relationships_prompt(process_title: str, steps: list, erp_modules: lis
 Steps: {str(steps)[:4000]}
 ERP Modules: {str(erp_modules)[:2000]}
 
+CRITICAL INSTRUCTIONS:
+
+- You MUST generate step_sequences connecting ALL steps
+- Total steps count = {len(steps)}
+- You MUST create exactly (total_steps - 1) step_sequences
+
+STRICT RULE:
+- Step 1 → Step 2
+- Step 2 → Step 3
+- Step 3 → Step 4
+- Continue this pattern until last step
+
+DO NOT:
+- Skip any step
+- Leave any step unconnected
+- Return empty step_sequences
+
+Even if relationships are unclear, ALWAYS assume linear execution order.
+
+VALIDATION REQUIREMENT:
+- If there are 10 steps, you MUST return 9 step_sequences
+- If not, your response is INVALID
+
+
+
 Return a JSON object with edge data for a graph database:
 {{
   "step_sequences": [
-    {{"from_step": 1, "to_step": 2, "relationship": "string - e.g. 'triggers'|'feeds into'|'conditionally leads to'", "condition": "string or null"}}
+    {{"from_step": 2, "to_step": 3, "type": "normal | conditional | loop", "condition": "optional condition"}}
   ],
   "module_relationships": [
     {{"from_module": "module name", "to_module": "module name", "relationship": "string"}}
@@ -287,3 +301,531 @@ Return a JSON object with edge data for a graph database:
     {{"description": "string - any external process this connects to"}}
   ]
 }}"""
+
+def build_toc_enrichment_prompt(
+    process_title: str,
+    toc_result: dict,           # output of TOCAnalyzer.to_dict()
+    steps: list,                # raw_steps from extraction
+) -> str:
+    import json
+    primary = toc_result.get("primary_constraint")
+    phases_summary = [
+        {"phase": p["phase"], "name": p["name"], "summary": p["summary"]}
+        for p in toc_result.get("phases", [])
+    ]
+
+    return f"""You are a Theory of Constraints (TOC) expert and business process optimization consultant.
+
+A rule-based algorithm has identified the following bottleneck analysis for the process: "{process_title}".
+
+PRIMARY CONSTRAINT (identified algorithmically):
+{safe_json(primary) if primary else "None identified"}
+
+ALL PROCESS STEPS:
+{safe_json(steps[:20])}
+
+CURRENT TOC PHASE SUMMARIES:
+{safe_json(phases_summary)}
+
+YOUR TASK:
+Review this analysis and enrich it with domain expertise. For each of the 5 TOC phases, 
+provide improved, specific action items based on the actual process context.
+
+Return a JSON object with this exact structure:
+{{
+  "enriched_summary": "string - 2-3 sentence executive summary of the bottleneck situation",
+  "constraint_validation": "string - confirm or challenge the algorithmic constraint identification with reasoning",
+  "improvement_potential_pct": number,  
+  "enriched_phases": [
+    {{
+      "phase": 1,
+      "name": "IDENTIFY",
+      "enriched_summary": "string",
+      "additional_actions": [
+        {{
+          "action": "string - specific, actionable step",
+          "owner": "string - role/team",
+          "impact": "high | medium | low",
+          "effort": "low | medium | high",
+          "automation_type": "rpa | ai_agent | workflow | none | null"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Be specific to this process — no generic advice
+- Phase 2 (EXPLOIT) must include at least 2 quick-win actions (low effort, immediate)
+- Phase 4 (ELEVATE) must include at least 1 technology recommendation
+- improvement_potential_pct must be a realistic number between 10 and 80
+- Return ONLY valid JSON"""
+
+
+# ── PASS 5: REACT FLOW GRAPH LAYOUT ──────────────────────────────────────────
+def build_react_flow_prompt(process_title: str, steps: list, suggestions: list) -> str:
+        return f"""
+    You are a React Flow diagram architect. Your job is to generate a COMPLETE, FULLY CONNECTED 
+    node-edge graph for the process: "{process_title}"
+
+    STEPS DATA:
+    {safe_json(steps)}
+
+    SUGGESTIONS DATA:
+    {safe_json(suggestions)}
+
+    YOUR TASK:
+    Generate a fully connected React Flow diagram with:
+    1. One GROUP node per unique actor
+    2. One STEP node per step (placed inside its actor's group)
+    3. One AGENT node per suggestion (placed to the right of all groups)
+    4. SEQUENTIAL edges connecting every step in order (step 1 → step 2 → step 3 etc.)
+    5. AUTOMATES edges from each agent to its target step
+    6. CONTINUES edges from each agent to the next step after its target
+
+    LAYOUT RULES:
+    - Groups are placed LEFT SIDE, stacked vertically, x=60, y increases by 300 per group
+    - Steps inside a group: x=20, y=60 + (slot_index * 100)
+    - Agent nodes are placed RIGHT SIDE: x=900, y increases by 220 per agent
+    - Every step MUST be inside a group (parentNode set)
+    - Every step MUST have at least one sequential edge
+
+    NODE ID RULES:
+    - Group nodes: "group-{{actor_name_lowercase_hyphenated}}"
+    - Step nodes: "step-{{step_number}}"
+    - Agent nodes: "agent-{{suggestion_index}}"
+
+    EDGE ID RULES:
+    - Sequential: "seq-{{from_step_number}}-{{to_step_number}}"
+    - Automates: "auto-{{agent_index}}-{{step_number}}"
+    - Continues: "cont-{{agent_index}}-{{next_step_number}}"
+
+    STRICT REQUIREMENTS:
+    - ALL steps must be connected sequentially — NO isolated steps
+    - If a step has no suggestion, it still gets a sequential edge
+    - Return EXACTLY one edge per sequential pair (n-1 edges for n steps)
+    - Agent nodes must connect to at least one step
+
+    Return ONLY this valid JSON structure, nothing else:
+
+
+    Return ONLY a VALID JSON with dynamically generated nodes and edges.
+
+    DO NOT reuse example IDs or labels.
+    ALL values must be derived from STEPS DATA and SUGGESTIONS DATA.
+
+    {{
+      "nodes": [
+        {{
+          "id": "group-procurement-team",
+          "type": "agentGroupNode",
+          "position": {{"x": 60, "y": 60}},
+          "style": {{"width": 380, "height": 260, "zIndex": 0}},
+          "data": {{
+            "label": "Procurement Team",
+            "icon": "Database",
+            "accentColor": "#6366f1"
+          }}
+        }},
+        {{
+          "id": "step-1",
+          "type": "processNode",
+          "parentNode": "group-procurement-team",
+          "extent": "parent",
+          "position": {{"x": 20, "y": 60}},
+          "style": {{"width": 340, "zIndex": 2}},
+          "data": {{
+            "label": "Convert Requisition to PO",
+            "actor": "Procurement Team",
+            "stepNumber": 1,
+            "automationPotential": 85,
+            "stepType": "system",
+            "inputs": ["Approved requisition"],
+            "outputs": ["Purchase Order"],
+            "painPoints": ["Manual data entry"],
+            "duration": "2 hours",
+            "erpModule": "MM",
+            "accentColor": "#10b981"
+          }}
+        }},
+        {{
+          "id": "agent-0",
+          "type": "agentNode",
+          "position": {{"x": 900, "y": 60}},
+          "style": {{"width": 300, "zIndex": 2}},
+          "data": {{
+            "title": "Automate PO Conversion",
+            "description": "Automatically converts approved requisitions",
+            "tasks": ["Read approved requisition", "Generate PO", "Post to ERP"],
+            "agentType": "workflow_automation",
+            "accuracy": 92,
+            "roiImpact": "high",
+            "effortLevel": "medium",
+            "technologies": ["SAP BTP", "Python"],
+            "accentColor": "#8b5cf6"
+          }}
+        }}
+      ],
+      "edges": [
+        {{
+          "id": "seq-1-2",
+          "source": "step-1",
+          "target": "step-2",
+          "type": "smoothstep",
+          "animated": true,
+          "label": "next",
+          "style": {{"stroke": "#4b5563", "strokeWidth": 2, "zIndex": 10}}
+        }},
+        {{
+          "id": "auto-0-1",
+          "source": "agent-0",
+          "target": "step-1",
+          "type": "smoothstep",
+          "animated": true,
+          "label": "automates suggestion",
+          "style": {{"strokeDasharray": "5,5", "stroke": "#8b5cf6", "strokeWidth": 2, "zIndex": 10}}
+        }},
+        {{
+          "id": "cont-0-2",
+          "source": "agent-0",
+          "target": "step-2",
+          "type": "smoothstep",
+          "animated": true,
+          "label": "continues flow",
+          "style": {{"stroke": "#22c55e", "strokeWidth": 2, "zIndex": 10}}
+        }}
+      ]
+    }}
+    """
+
+
+def build_inventory_react_flow_prompt(process_title: str, steps: list, suggestions: list) -> str:
+    """
+    Specialised React Flow prompt for Inventory Check / Sales Order Acceptance workflows.
+
+    Graph structure it produces:
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  START → Sales Order Agent → [Validate Order Data]             │
+    │                │ VALID              │ FAILED                   │
+    │                ▼                   ▼                           │
+    │        [Query Inventory DB]   [Order Rejected]                 │
+    │                │                                               │
+    │         Inventory Agent                                        │
+    │         ② Check Stock                                          │
+    │         ③ Analyze Allocation                                   │
+    │         ④ Determine Availability                               │
+    │                │                                               │
+    │         ◆ Stock Available?                                     │
+    │          YES ↙           NO/PARTIAL ↘                         │
+    │   [Reserve Stock]         [Consider Alternatives]              │
+    │   [Confirm Avail.]        [Calculate Lead Times]  ← Reorder   │
+    │   [Update Status]         [Generate Options]         Agent     │
+    │   [Accept Order]          [Propose Options]                    │
+    │   [Notify Customer/ERP]   [Update Status → Accept]            │
+    └─────────────────────────────────────────────────────────────────┘
+
+    Key differences from the generic prompt:
+    - Enforces a DECISION NODE for "Stock Available?" (diamond shape)
+    - Enforces YES / NO-PARTIAL dual-path edges with colour coding
+    - Places Reorder Agent on the NO path with dashed "triggers" edges
+    - Produces cross-group edge zIndex:10 so edges render above group containers
+    """
+
+    steps_json = safe_json(steps)
+    suggestions_json = safe_json(suggestions)
+
+    return f"""
+You are a React Flow diagram architect specialising in inventory and order management workflows.
+Your output is RAW JSON ONLY — no markdown, no explanation, no code fences.
+
+PROCESS TITLE: "{process_title}"
+
+STEPS (from database):
+{steps_json}
+
+AUTOMATION SUGGESTIONS (from database):
+{suggestions_json}
+
+════════════════════════════════════════════════════════
+GRAPH STRUCTURE YOU MUST PRODUCE
+════════════════════════════════════════════════════════
+
+The graph has FOUR AGENT LANES and TWO OUTCOME PATHS.
+
+──────────────────────────────────────────────────────
+LANE 1 — Sales Order Agent  (group id: "group-sales-order-agent")
+  Position: x=60, y=40, width=380, height=180
+  Contains:
+    • node "step-validate" — type "processNode" — "Validate Order Data"
+        position inside group: x=20, y=60
+        Checks completeness and Product Catalog via API
+
+──────────────────────────────────────────────────────
+LANE 2 — Inventory Agent  (group id: "group-inventory-agent")
+  Position: x=60, y=260, width=380, height=400
+  Contains (in order):
+    • node "step-query-db"      — "Query Inventory DB"         — y=60
+    • node "step-check-stock"   — "Check Stock Levels"         — y=160  (② label in data)
+    • node "step-analyze-alloc" — "Analyze Allocation"         — y=245  (③)
+    • node "step-determine-avail"— "Determine Availability"    — y=330  (④ — calculates ATP)
+
+──────────────────────────────────────────────────────
+DECISION NODE — "Stock Available?"
+  id: "node-stock-decision"
+  type: "decisionNode"   ← diamond shape in frontend
+  position: x=520, y=440   (OUTSIDE all groups — standalone)
+  data.label: "Stock Available?"
+
+──────────────────────────────────────────────────────
+LANE 3 — YES Path (group id: "group-yes-path")
+  Position: x=60, y=700, width=380, height=520
+  data.label: "Accept Flow"
+  Contains:
+    • node "step-reserve"        — "Reserve Stock"          — y=60   (Inventory Agent locks qty)
+    • node "step-confirm-avail"  — "Confirm Availability"   — y=145
+    • node "step-update-yes"     — "Update Order Status"    — y=230  (Ready to Ship)
+    • node "step-accept-order"   — "Accept Order"           — y=315
+    • node "step-notify-yes"     — "Order Accepted — Notify Customer/ERP" — y=400
+
+──────────────────────────────────────────────────────
+LANE 4 — NO/PARTIAL Path (group id: "group-no-path")
+  Position: x=500, y=700, width=400, height=520
+  data.label: "Alternatives Flow"
+  Contains:
+    • node "step-consider-alt"   — "Consider Alternatives"  — y=60   (other WH, lead times, supplier)
+    • node "step-calc-lead"      — "Calculate Lead Times"   — y=145
+    • node "step-gen-options"    — "Generate Options"       — y=230
+    • node "step-propose"        — "Propose Options"        — y=315  (Partial Ship / Wait / Backorder → Sales)
+    • node "step-update-no"      — "Update Order Status"    — y=400  (Ready to Ship)
+    • node "step-accept-no"      — "Accept Order"           — y=475
+
+──────────────────────────────────────────────────────
+AGENT NODES (outside groups, right side x=960)
+  • agent-sales-order  — "Sales Order Agent"  — y=100   type "agentNode"  accentColor "#3B82F6"
+  • agent-inventory    — "Inventory Agent"    — y=380   type "agentNode"  accentColor "#3B82F6"
+  • agent-reorder      — "Reorder Agent"      — y=780   type "agentNode"  accentColor "#8B5CF6"
+    data.description: "Checks other warehouses and lead times"
+
+════════════════════════════════════════════════════════
+EDGES YOU MUST PRODUCE (exact IDs)
+════════════════════════════════════════════════════════
+
+MAIN FLOW EDGES (animated, smoothstep, stroke "#4B5563", strokeWidth 2, zIndex 10):
+  seq-start-validate        : agent-sales-order  → step-validate
+  seq-validate-querydb      : step-validate       → step-query-db        label "VALID"   stroke "#16A34A"
+  seq-querydb-checkstock    : step-query-db       → step-check-stock
+  seq-checkstock-analyze    : step-check-stock    → step-analyze-alloc
+  seq-analyze-determine     : step-analyze-alloc  → step-determine-avail
+  seq-determine-decision    : step-determine-avail → node-stock-decision
+
+DECISION EDGES:
+  dec-yes   : node-stock-decision → step-reserve      label "YES"        stroke "#16A34A"  strokeWidth 2
+  dec-no    : node-stock-decision → step-consider-alt label "NO/PARTIAL" stroke "#DC2626"  strokeWidth 2
+
+REJECTION EDGE (from validate, type "smoothstep", stroke "#DC2626", strokeDasharray "5 5"):
+  edge-validate-rejected : step-validate → node-rejected   label "FAILED"   stroke "#DC2626"
+
+REJECTION NODE (standalone, not in any group):
+  id: "node-rejected"
+  type: "processNode"
+  position: x=520, y=100
+  data.label: "Order Rejected / Correction Needed"
+  data.accentColor: "#EF4444"
+  data.description: "Notification to Sales"
+
+YES PATH SEQUENTIAL EDGES (stroke "#16A34A", animated, zIndex 10):
+  seq-reserve-confirm  : step-reserve       → step-confirm-avail
+  seq-confirm-update   : step-confirm-avail → step-update-yes
+  seq-update-accept    : step-update-yes    → step-accept-order
+  seq-accept-notify    : step-accept-order  → step-notify-yes
+
+NO PATH SEQUENTIAL EDGES (stroke "#F59E0B", animated, zIndex 10):
+  seq-consider-calc    : step-consider-alt  → step-calc-lead
+  seq-calc-gen         : step-calc-lead     → step-gen-options
+  seq-gen-propose      : step-gen-options   → step-propose
+  seq-propose-updateno : step-propose       → step-update-no
+  seq-updateno-acceptno: step-update-no     → step-accept-no
+
+AGENT AUTOMATION EDGES (dashed, stroke "#8B5CF6", strokeDasharray "5 5", zIndex 10):
+  auto-sales-validate  : agent-sales-order → step-validate       label "validates"
+  auto-inv-checkstock  : agent-inventory   → step-check-stock    label "checks"
+  auto-inv-analyze     : agent-inventory   → step-analyze-alloc  label "analyzes"
+  auto-reorder-consider: agent-reorder     → step-consider-alt   label "triggers"
+  auto-reorder-calc    : agent-reorder     → step-calc-lead      label "calculates"
+
+CONTINUES FLOW EDGES (stroke "#22C55E", animated, zIndex 10):
+  cont-inv-determine   : agent-inventory   → step-determine-avail label "continues flow"
+
+════════════════════════════════════════════════════════
+NODE DATA TEMPLATE
+════════════════════════════════════════════════════════
+
+Every processNode data object must include:
+  label, actor, stepType ("system"|"manual"|"decision"),
+  automationPotential (0-100 int),
+  inputs (string[]), outputs (string[]),
+  painPoints (string[]), duration (string),
+  erpModule (string),
+  accentColor ("#10B981" if >=80, "#F59E0B" if >=60, "#EF4444" otherwise)
+
+Every agentNode data object must include:
+  title, description, tasks (string[]),
+  agentType ("workflow_automation"|"decision_support"|"reorder"),
+  accuracy (int), roiImpact ("high"|"medium"|"low"),
+  effortLevel ("high"|"medium"|"low"),
+  technologies (string[]),
+  accentColor
+
+Every agentGroupNode data object must include:
+  label, icon ("Database"|"UserCircle"|"Layers"),
+  accentColor ("#6366F1")
+
+GROUP STYLE: {{ "width": <w>, "height": <h>, "zIndex": 0 }}
+STEP STYLE:  {{ "width": 340, "zIndex": 2 }}
+AGENT STYLE: {{ "width": 300, "zIndex": 2 }}
+
+ALL edges must include:
+  id, source, target, type ("smoothstep"), animated (bool),
+  label (string|""), zIndex (10),
+  style: {{ stroke, strokeWidth (2), zIndex (10),
+            strokeDasharray (omit if solid) }}
+
+════════════════════════════════════════════════════════
+MAP INCOMING STEPS DATA TO THE GRAPH ABOVE
+════════════════════════════════════════════════════════
+
+Use the steps and suggestions from the database to FILL IN the node data fields.
+Match each DB step to the closest structural node by step_number or title keywords.
+If a DB step doesn't map cleanly, add it as an extra processNode inside the most
+appropriate group, appending a sequential edge to maintain connectivity.
+
+Do NOT invent node IDs that differ from the spec above.
+Do NOT omit any node or edge listed above.
+If suggestions data provides agent tasks/technologies, use them in the agent nodes.
+
+════════════════════════════════════════════════════════
+OUTPUT FORMAT
+════════════════════════════════════════════════════════
+
+Return ONLY this JSON structure — no other text:
+
+{{
+  "nodes": [
+    {{
+      "id": "...",
+      "type": "agentGroupNode"|"processNode"|"decisionNode"|"agentNode",
+      "position": {{"x": 0, "y": 0}},
+      "parentNode": "group-id-if-inside-group",
+      "extent": "parent",
+      "style": {{...}},
+      "data": {{...}}
+    }}
+  ],
+  "edges": [
+    {{
+      "id": "...",
+      "source": "...",
+      "target": "...",
+      "type": "smoothstep",
+      "animated": true,
+      "label": "...",
+      "zIndex": 10,
+      "style": {{"stroke": "...", "strokeWidth": 2, "zIndex": 10}}
+    }}
+  ]
+}}
+""".strip()
+
+
+def build_workflow_categorization_prompt(process_title: str, steps: list, suggestions: list) -> str:
+    return f"""
+You are an expert Enterprise Process Architect.
+
+Your task is to classify the given business workflow into EXACTLY 4 layers of an 
+"Operating Model: Workflow Automation".
+
+Return a structured JSON with the following 4 categories:
+
+--------------------------------------------------
+
+1. User Interaction Layer
+- Anything related to dashboards, UI, human inputs, approvals
+- Manual overrides, monitoring, alerts
+
+2. Agent Orchestration
+- Workflow engine logic
+- Scheduling, retries, parallel execution
+- Agent coordination and decision routing
+
+3. ERP Module Integration
+- SAP/Oracle/ERP APIs
+- Data mapping, transactions, DB operations
+- Master data sync, event triggers
+
+4. Governance / Observability
+- Logging, audit trails, SLA tracking
+- Monitoring, anomaly detection
+- Compliance & reporting
+
+--------------------------------------------------
+
+INPUT DATA:
+
+PROCESS:
+{process_title}
+
+STEPS:
+{json.dumps(steps, indent=2)}
+
+SUGGESTIONS:
+{json.dumps(suggestions, indent=2)}
+
+--------------------------------------------------
+
+INSTRUCTIONS:
+
+1. Map EACH step into ONE of the 4 layers
+2. Do NOT skip any step
+3. Group similar steps together
+4. Keep descriptions concise but meaningful
+5. Maintain enterprise-level terminology
+
+--------------------------------------------------
+
+OUTPUT FORMAT (STRICT JSON):
+
+{{
+  "user_interaction_layer": {{
+    "description": "...",
+    "steps": [
+      {{
+        "step_number": 1,
+        "title": "...",
+        "reason": "Why it belongs here"
+      }}
+    ]
+  }},
+  "agent_orchestration": {{
+    "description": "...",
+    "steps": []
+  }},
+  "erp_module_integration": {{
+    "description": "...",
+    "steps": []
+  }},
+  "governance_observability": {{
+    "description": "...",
+    "steps": []
+  }}
+}}
+
+--------------------------------------------------
+
+IMPORTANT RULES:
+
+- No hallucination
+- Use ONLY provided steps
+- If unclear → choose best logical fit
+- Ensure all 4 categories are present
+- No extra text outside JSON
+"""

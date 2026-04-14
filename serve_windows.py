@@ -26,7 +26,7 @@ app = create_app()
 
 if __name__ == "__main__":
     host = os.getenv("FLASK_HOST", "0.0.0.0")
-    port = int(os.getenv("FLASK_PORT", 3006))
+    port = int(os.getenv("FLASK_PORT", 3004))
     threads = int(os.getenv("WAITRESS_THREADS", 4))
 
     logger.info(f"Starting Waitress server on {host}:{port} with {threads} threads")

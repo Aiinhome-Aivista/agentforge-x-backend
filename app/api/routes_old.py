@@ -184,43 +184,6 @@ def get_automation(process_key: str):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# @api_bp.get("/processes/<process_key>/flow")
-# def get_react_flow(process_key: str):
-#     """
-#     Returns the process data mapped specifically for the React Flow frontend.
-#     """
-#     try:
-#         flow_data = analysis_service.get_react_flow_data(process_key)
-#         if not flow_data["nodes"]:
-#             return jsonify({"error": "Process flow not found"}), 404
-            
-#         return jsonify(flow_data)
-#     except Exception as e:
-#         logger.error(f"Get React flow error: {e}", exc_info=True)
-#         return jsonify({"error": "Could not fetch process flow data"}), 500
-
-@api_bp.get("/processes/<_key>/flow")
-def get_react_flow(_key: str):
-    """
-    Returns the process data mapped specifically for the React Flow frontend.
-    """
-    try:
-        # Pass the _key value to your service
-        flow_data = analysis_service.get_react_flow_data(_key)
-        
-        if not flow_data["nodes"]:
-            return jsonify({"error": "Process flow not found"}), 404
-            
-        return jsonify(flow_data)
-    except Exception as e:
-        logger.error(f"Get React flow error: {e}", exc_info=True)
-        return jsonify({"error": "Could not fetch process flow data"}), 500
-
-
-
-
-    
 # ── RAG Chat ──────────────────────────────────────────────────────────────
 
 @api_bp.post("/chat")

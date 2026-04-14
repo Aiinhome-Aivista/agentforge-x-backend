@@ -14,9 +14,12 @@ from app.prompts.prompts import (
     SYSTEM_PROCESS_ANALYST,
     SYSTEM_AUTOMATION_EXPERT,
     build_extraction_prompt,
+    build_react_flow_prompt,
+    build_inventory_react_flow_prompt,
     build_scoring_prompt,
     build_suggestions_prompt,
     build_relationships_prompt,
+    build_workflow_categorization_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,21 +53,45 @@ class MistralClient:
                     raise
                 logger.warning(f"Mistral attempt {attempt+1} failed: {e}. Retrying...")
 
-    def _parse_json(self, raw: str) -> Any:
-        """Robustly parse JSON from LLM response, stripping any markdown fences."""
+    def _parse_json(self, raw: str):
         raw = raw.strip()
-        # Strip markdown code fences
+
+        # remove markdown fences
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-        raw = raw.strip()
+
+        # try direct parse
         try:
             return json.loads(raw)
-        except json.JSONDecodeError:
-            # Try to find JSON object/array within the response
-            match = re.search(r"(\{.*\}|\[.*\])", raw, re.DOTALL)
-            if match:
-                return json.loads(match.group(1))
-            raise ValueError(f"Could not parse JSON from LLM response: {raw[:300]}")
+        except:
+            pass
+
+        # try extract JSON array FIRST
+        array_match = re.search(r"\[\s*\{.*?\}\s*\]", raw, re.DOTALL)
+        if array_match:
+            try:
+                return json.loads(array_match.group(0))
+            except:
+                pass
+
+        # try extract JSON object
+        obj_match = re.search(r"\{\s*\".*?\}\s*", raw, re.DOTALL)
+        if obj_match:
+            try:
+                return json.loads(obj_match.group(0))
+            except:
+                pass
+
+        # LAST fallback: try fixing common issues
+        try:
+            fixed = raw.replace("\n", "").replace("\t", "")
+            fixed = re.sub(r",\s*}", "}", fixed)  # remove trailing commas
+            fixed = re.sub(r",\s*]", "]", fixed)
+            return json.loads(fixed)
+        except:
+            logger.error("❌ JSON PARSE FAILED")
+            logger.error(raw[:1000])  # log first part
+            return []
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -152,7 +179,7 @@ class MistralClient:
 
         logger.info(f"Suggestions generated: {len(suggestions_list)}")
 
-        return suggestions_list
+        return suggestions
 
     def extract_relationships(
         self, process_title: str, steps: List[Dict], erp_modules: List[Dict]
@@ -167,6 +194,84 @@ class MistralClient:
             return {"step_sequences": [], "module_relationships": [], "cross_process_dependencies": []}
 
 
+    def generate_react_flow(self, process_title: str, steps: list, suggestions: list, workflow_type: str = "generic") -> dict:
+        wf_keywords = ["inventory", "stock", "sales order", "purchase order", "procurement"]
+        if workflow_type == "inventory" or any(k in process_title.lower() for k in wf_keywords):
+            prompt = build_inventory_react_flow_prompt(process_title, steps, suggestions)
+        else:
+            prompt = build_react_flow_prompt(process_title, steps, suggestions)
+        
+        response = self.client.chat.complete(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": SYSTEM_AUTOMATION_EXPERT},
+                {"role": "user",   "content": prompt}
+            ],
+            max_tokens=6000,   # IMPORTANT: must be high for large processes
+            temperature=0.1    # low temp = deterministic layout
+        )
+        
+        raw = response.choices[0].message.content
+        return self._parse_json(raw)        
+
+
+    def decompose_micro_process(self, steps):
+        import json
+
+        # ✅ FIX 1: escape JSON for f-string
+        steps_json = json.dumps(steps, indent=2).replace("{", "{{").replace("}", "}}")
+
+        prompt = f"""
+    Break each step into micro-processes and decisions.
+
+    Steps:
+    {steps_json}
+
+    Return:
+    [
+    {{
+        "step_number": 1,
+        "micro_steps": [...],
+        "decisions": [...]
+    }}
+    ]
+    """
+
+        raw = self._chat(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.2)
+
+        # ✅ FIX 2: safe parse
+        parsed = self._parse_json(raw)
+
+        # ✅ FIX 3: ensure list of dict
+        if not isinstance(parsed, list):
+            logger.warning(f"Micro process not list: {type(parsed)} → {parsed}")
+            return []
+
+        # filter valid dicts only
+        cleaned = [p for p in parsed if isinstance(p, dict)]
+
+        return cleaned
+
+
+    def categorize_workflow(self, process_title, steps, suggestions):
+        prompt = build_workflow_categorization_prompt(
+            process_title,
+            steps,
+            suggestions
+        )
+
+        response = self.client.chat.completions.create(
+            model="mistral-large-latest",  # or your model
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2
+        )
+
+        content = response.choices[0].message.content
+
+        try:
+            return json.loads(content)
+        except Exception:
+            return {}
 # Singleton
 _client_instance = None
 

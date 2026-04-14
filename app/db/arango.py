@@ -23,6 +23,8 @@ COLLECTIONS = {
 EDGE_COLLECTIONS = {
     "has_step": "has_step",            # process → step
     "step_sequence": "step_sequence",  # step → step (ordering)
+    "decision_branch": "decision_branch_edges",  
+    "micro_flow": "micro_flow_edges",
     "triggers_suggestion": "triggers_suggestion",  # step → suggestion
     "belongs_to_module": "belongs_to_module",       # process → erp_module
     "module_relation": "module_relation",            # erp_module → erp_module
@@ -74,10 +76,10 @@ class ArangoDB:
         return cls._instance
 
     def _connect(self):
-        host = os.getenv("ARANGO_HOST", "https://409940ccdebc.arangodb.cloud:8529")
+        host = os.getenv("ARANGO_HOST", "https://e3850a1afb88.arangodb.cloud:8529")
         db_name = os.getenv("ARANGO_DB", "agent")
         username = os.getenv("ARANGO_USERNAME", "root")
-        password = os.getenv("ARANGO_PASSWORD", "HjzEYC4ilPIudYvQRPdR")
+        password = os.getenv("ARANGO_PASSWORD", "RYQdGYKJavDIheMjmbUK")
 
         self.client = ArangoClient(hosts=host)
         sys_db = self.client.db("_system", username=username, password=password)
