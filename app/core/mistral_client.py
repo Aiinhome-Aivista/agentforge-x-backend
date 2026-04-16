@@ -9,6 +9,7 @@ import logging
 import re
 from typing import Any, Dict, List
 from mistralai import Mistral
+from json_repair import repair_json
 
 from app.prompts.prompts import (
     SYSTEM_PROCESS_ANALYST,
@@ -53,46 +54,107 @@ class MistralClient:
                     raise
                 logger.warning(f"Mistral attempt {attempt+1} failed: {e}. Retrying...")
 
+    # def _parse_json(self, raw: str):
+    #     raw = raw.strip()
+
+    #     # remove markdown fences
+    #     raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    #     raw = re.sub(r"\s*```$", "", raw)
+
+    #     # try direct parse
+    #     try:
+    #         return json.loads(raw)
+    #     except:
+    #         pass
+
+    #     # try extract JSON array FIRST
+    #     array_match = re.search(r"\[\s*\{.*?\}\s*\]", raw, re.DOTALL)
+    #     if array_match:
+    #         try:
+    #             return json.loads(array_match.group(0))
+    #         except:
+    #             pass
+
+    #     # try extract JSON object
+    #     obj_match = re.search(r"\{\s*\".*?\}\s*", raw, re.DOTALL)
+    #     if obj_match:
+    #         try:
+    #             return json.loads(obj_match.group(0))
+    #         except:
+    #             pass
+
+    #     # LAST fallback: try fixing common issues
+    #     try:
+    #         fixed = raw.replace("\n", "").replace("\t", "")
+    #         fixed = re.sub(r",\s*}", "}", fixed)  # remove trailing commas
+    #         fixed = re.sub(r",\s*]", "]", fixed)
+    #         return json.loads(fixed)
+    #     except:
+    #         logger.error("❌ JSON PARSE FAILED")
+    #         logger.error(raw[:1000])  # log first part
+    #         return []
+
+
+
+
+
     def _parse_json(self, raw: str):
         raw = raw.strip()
 
-        # remove markdown fences
+        # 🔹 1. Remove markdown fences
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
 
-        # try direct parse
+        # 🔹 2. Try direct parse
         try:
             return json.loads(raw)
         except:
             pass
 
-        # try extract JSON array FIRST
-        array_match = re.search(r"\[\s*\{.*?\}\s*\]", raw, re.DOTALL)
-        if array_match:
+        # 🔹 3. Extract largest JSON block (robust)
+        json_candidate = self._extract_largest_json(raw)
+
+        if json_candidate:
             try:
-                return json.loads(array_match.group(0))
+                return json.loads(json_candidate)
             except:
                 pass
 
-        # try extract JSON object
-        obj_match = re.search(r"\{\s*\".*?\}\s*", raw, re.DOTALL)
-        if obj_match:
-            try:
-                return json.loads(obj_match.group(0))
-            except:
-                pass
-
-        # LAST fallback: try fixing common issues
+        # 🔹 4. Use json_repair (BEST FIX)
         try:
-            fixed = raw.replace("\n", "").replace("\t", "")
-            fixed = re.sub(r",\s*}", "}", fixed)  # remove trailing commas
-            fixed = re.sub(r",\s*]", "]", fixed)
-            return json.loads(fixed)
+            repaired = repair_json(raw)
+            return json.loads(repaired)
         except:
-            logger.error("❌ JSON PARSE FAILED")
-            logger.error(raw[:1000])  # log first part
-            return []
+            pass
 
+        # 🔹 5. Final fallback logging
+        logger.error("❌ JSON PARSE FAILED")
+        logger.error(raw[:2000])
+
+        return []
+
+
+
+    def _extract_largest_json(self, text: str):
+        stack = []
+        start = None
+        max_json = ""
+
+        for i, char in enumerate(text):
+            if char in "{[":
+                if not stack:
+                    start = i
+                stack.append(char)
+
+            elif char in "}]":
+                if stack:
+                    stack.pop()
+                    if not stack and start is not None:
+                        candidate = text[start:i+1]
+                        if len(candidate) > len(max_json):
+                            max_json = candidate
+
+        return max_json if max_json else None
     # ── Public API ────────────────────────────────────────────────────────────
 
     def extract_process(self, text: str, source_type: str, file_name: str) -> Dict:

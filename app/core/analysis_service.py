@@ -15,13 +15,20 @@ import json
 from app.db.db_connection import get_mysql_connection
 from app.core.toc_analyzer import TOCAnalyzer
 
+
 logger = logging.getLogger(__name__)
+
 
 import re
 
 
+
+
 def escape_braces(text: str) -> str:
     return str(text).replace("{", "{{").replace("}", "}}")
+
+
+
 
 
 
@@ -30,7 +37,9 @@ def slugify(text):
     text = re.sub(r'[^a-z0-9]+', '-', text)
     return text.strip('-')
 
+
 used_edge_ids = set()
+
 
 def unique_edge_id(base):
     i = 1
@@ -41,12 +50,15 @@ def unique_edge_id(base):
     used_edge_ids.add(new_id)
     return new_id
 
+
 def serialize(obj):
     if isinstance(obj, list):
         return [serialize(o) for o in obj]
     if hasattr(obj, "__dict__"):
         return obj.__dict__
     return obj
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,6 +70,7 @@ _INVENTORY_KEYWORDS = [
     "order management", "fulfillment",
 ]
 
+
 def _detect_workflow_type(process_title: str) -> str:
     t = process_title.lower()
     if any(k in t for k in _INVENTORY_KEYWORDS):
@@ -65,7 +78,10 @@ def _detect_workflow_type(process_title: str) -> str:
     return "generic"
 
 
+
+
 class AnalysisService:
+
 
     def analyze(
         self,
@@ -78,17 +94,20 @@ class AnalysisService:
         db  = get_db()
         llm = get_mistral_client()
 
+
         # Step 1: Parse all files
         combined_text_parts = []
         combined_metadata   = {}
         primary_file        = files[0][1]
         primary_source_type = detect_source_type(primary_file)
 
+
         for file_bytes, filename in files:
             text, meta = parse_file(file_bytes, filename)
             combined_text_parts.append(f"=== File: {filename} ===\n{text}")
             combined_metadata[filename] = meta
             logger.info(f"Parsed {filename}: {len(text)} chars")
+
 
         combined_text = "\n\n".join(combined_text_parts)
         if user_input:
@@ -97,8 +116,10 @@ class AnalysisService:
                 f"=== UPLOADED FILE DATA ===\n{combined_text}"
             )
 
+
         # Step 2: LLM Pass 1 — Extraction
         extracted = llm.extract_process(combined_text, primary_source_type, primary_file)
+
 
         process_title   = extracted.get("process_title", "Unnamed Process")
         process_desc    = extracted.get("process_description", "")
@@ -107,12 +128,15 @@ class AnalysisService:
         raw_erp_modules = extracted.get("erp_modules_identified", [])
         erp_system      = extracted.get("erp_system")
 
+
         # Step 2b: Micro-process decomposition
         micro_data = llm.decompose_micro_process(raw_steps)
+
 
         for step in raw_steps:
             match = next(
                 
+
 
             (m for m in micro_data if isinstance(m, dict) and m.get("step_number") == step.get("step_number")),
                 {}
@@ -120,10 +144,15 @@ class AnalysisService:
             step["micro_steps"] = match.get("micro_steps", [])
             step["decisions"] = match.get("decisions", [])
 
+
         # Step 3: LLM Pass 2 — Automation Scoring
         safe_context = escape_braces(f"{process_title}: {process_desc}")
 
+
         scores = llm.score_automation(raw_steps, safe_context)
+
+
+
 
 
 
@@ -136,12 +165,14 @@ class AnalysisService:
                 step["automation_reasoning"] = matched.get("automation_reasoning", "")
                 step["quick_win"]            = matched.get("quick_win", False)
 
+
         # Step 3b: Decision Analysis (NEW PASS)
         if hasattr(llm, "analyze_decisions"):
             decision_data = llm.analyze_decisions(raw_steps)
         else:
             logger.warning("analyze_decisions not found")
             decision_data = []
+
 
         # Merge back into steps
         for step in raw_steps:
@@ -153,6 +184,7 @@ class AnalysisService:
             step["decision_confidence"] = match.get("confidence")
             step["decision_automation_feasibility"] = match.get("automation_feasibility")        
 
+
         # Step 4: LLM Pass 3 — Agentic Suggestions
         suggestions_response = llm.generate_suggestions(raw_steps, scores, process_title)
         if isinstance(suggestions_response, dict):
@@ -161,6 +193,7 @@ class AnalysisService:
             raw_suggestions = suggestions_response
         else:
             raw_suggestions = []
+
 
         # Step 4b: Theory of Constraints
         toc_dict = {}
@@ -192,12 +225,15 @@ class AnalysisService:
         except Exception as e:
             logger.warning(f"Categorization failed: {e}")
 
+
         # Step 5: LLM Pass 4 — Graph Relationships
         relationships = llm.extract_relationships(process_title, raw_steps, raw_erp_modules)
+
 
         # Step 6: Aggregate automation score
         potentials = [s.get("automation_potential", 0) for s in raw_steps]
         avg_score  = round(sum(potentials) / len(potentials), 1) if potentials else 0
+
 
         # Step 7: Build domain objects
         process_doc = ProcessDocument(
@@ -212,25 +248,31 @@ class AnalysisService:
             file_name=primary_file,
         )
 
+
         if toc_dict:
             toc_dict["process_key"] = process_doc._key
 
+
         step_objects: List[ProcessStep] = []
         step_key_map: Dict[int, str]   = {}
+
 
         def resolve_step_type(step_type, automation_potential):
             if automation_potential >= 80: return "Higher Agentic intervention"
             if automation_potential >= 60: return "Human + AI Intervention"
             return "Higher Human intervention"
 
+
         def clean_step_number(val, index):
             try:    return int(str(val).strip().replace(".", ""))
             except: return index + 1
+
 
         for idx, raw in enumerate(raw_steps):
             step_num = clean_step_number(raw.get("step_number"), idx)
             if step_num in step_key_map:
                 step_num = max(step_key_map.keys()) + 1
+
 
             step = ProcessStep(
                 process_key=process_doc._key,
@@ -253,7 +295,9 @@ class AnalysisService:
             step_objects.append(step)
             step_key_map[step_num] = step._key
 
+
         suggestion_objects: List[AutomationSuggestion] = []
+
 
         for raw in raw_suggestions:
             step_num       = raw.get("step_number", 0)
@@ -263,12 +307,15 @@ class AnalysisService:
                 (s for s in raw_steps if int(s.get("step_number", 0)) == int(step_num)), {}
             )
 
+
             if "metrics" not in raw or not isinstance(raw["metrics"], dict):
                 raw["metrics"] = {}
             raw["metrics"]["automation_potential"] = step_data.get("automation_potential", 0)
             raw["metrics"]["reason"]               = step_data.get("automation_reasoning", "")
 
+
             accuracy_reason = raw.get("accuracy_reason") or raw.get("description", "")
+
 
             if not step_num:
                 title   = raw.get("title", "").lower()
@@ -285,11 +332,13 @@ class AnalysisService:
                     )
                     step_key = matched._key if matched else None
 
+
             if not step_key:
                 continue
             step_obj = next((s for s in step_objects if s._key == step_key), None)
             if step_obj and step_obj.step_type == "Higher Human intervention":
                 continue
+
 
             suggestion_objects.append(AutomationSuggestion(
                 process_key=process_doc._key,
@@ -308,6 +357,7 @@ class AnalysisService:
                 metrics=raw.get("metrics", {})
             ))
 
+
         erp_module_objects: List[ERPModule]  = []
         erp_module_key_map: Dict[str, str]   = {}
         for raw in raw_erp_modules:
@@ -323,6 +373,7 @@ class AnalysisService:
             erp_module_objects.append(mod)
             erp_module_key_map[mod.module_name] = mod._key
 
+
         insight_objects = [
             KeyInsight(
                 text=i.get("text", ""),
@@ -332,15 +383,18 @@ class AnalysisService:
             for i in raw_insights
         ]
 
+
         top_targets = sorted(
             [{"title": s.title, "actor": s.actor, "automation_potential": s.automation_potential}
              for s in step_objects],
             key=lambda x: x["automation_potential"], reverse=True
         )[:5]
 
+
         # Step 8: Persist to ArangoDB
         self._persist(db, process_doc, step_objects, suggestion_objects,
                       erp_module_objects, relationships, step_key_map, erp_module_key_map)
+
 
         # Step 9: Vector DB
         try:
@@ -349,12 +403,15 @@ class AnalysisService:
         except Exception as e:
             logger.warning(f"VectorDB storage failed: {e}")
 
+
         generate_graph_html(process_doc._key, step_objects, relationships)
+
 
         BASE_URL     = os.getenv("BASE_URL")
         graph_folder = f"graphs/{process_doc._key}"
         os.makedirs(graph_folder, exist_ok=True)
         graph_url    = f"{BASE_URL}/{graph_folder.replace(os.sep, '/')}/graph.html"
+
 
         # Step 10: MySQL
         try:
@@ -382,6 +439,7 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"MySQL insert failed: {e}")
 
+
         return AnalysisResult(
             process=process_doc,
             steps=step_objects,
@@ -395,14 +453,18 @@ class AnalysisService:
         )
 
 
+
+
     def _persist(self, db, process_doc, steps, suggestions,
                  erp_modules, relationships, step_key_map, erp_module_key_map):
         try:
             col   = db.collection
             graph = db.graph()
 
+
             col(COLLECTIONS["documents"]).insert(process_doc.to_doc(), overwrite=True)
             proc_id = f"{COLLECTIONS['documents']}/{process_doc._key}"
+
 
             for step in steps:
                 col(COLLECTIONS["steps"]).insert(step.to_doc(), overwrite=True)
@@ -411,6 +473,7 @@ class AnalysisService:
             for mod in erp_modules:
                 col(COLLECTIONS["erp_modules"]).insert(mod.to_doc(), overwrite=True)
 
+
             ec_has_step = graph.edge_collection(EDGE_COLLECTIONS["has_step"])
             for step in steps:
                 ec_has_step.insert({
@@ -418,6 +481,7 @@ class AnalysisService:
                     "_to":   f"{COLLECTIONS['steps']}/{step._key}",
                     "step_number": step.step_number,
                 })
+
 
             # ec_seq = graph.edge_collection(EDGE_COLLECTIONS["step_sequence", "decision_branch", "micro_flow",])
             # for seq in relationships.get("step_sequences", []):
@@ -431,24 +495,30 @@ class AnalysisService:
             #             "condition":    seq.get("condition"),
             #         })
 
+
             edge_types = {
                 "step_sequence": graph.edge_collection(EDGE_COLLECTIONS["step_sequence"]),
                 "decision_branch": graph.edge_collection(EDGE_COLLECTIONS["decision_branch"]),
                 "micro_flow": graph.edge_collection(EDGE_COLLECTIONS["micro_flow"]),
             }
 
+
             for seq in relationships.get("step_sequences", []):
                 fk = step_key_map.get(seq.get("from_step"))
                 tk = step_key_map.get(seq.get("to_step"))
 
+
                 if not (fk and tk):
                     continue
 
+
                 rel_type = seq.get("type", "step_sequence")  # default fallback
+
 
                 ec = edge_types.get(rel_type)
                 if not ec:
                     continue
+
 
                 ec.insert({
                     "_from": f"{COLLECTIONS['steps']}/{fk}",
@@ -456,6 +526,7 @@ class AnalysisService:
                     "relationship": seq.get("relationship", "leads_to"),
                     "condition": seq.get("condition"),
                 })
+
 
             ec_sug = graph.edge_collection(EDGE_COLLECTIONS["triggers_suggestion"])
             for sug in suggestions:
@@ -465,12 +536,14 @@ class AnalysisService:
                         "_to":   f"{COLLECTIONS['suggestions']}/{sug._key}",
                     })
 
+
             ec_mod = graph.edge_collection(EDGE_COLLECTIONS["belongs_to_module"])
             for mod in erp_modules:
                 ec_mod.insert({
                     "_from": proc_id,
                     "_to":   f"{COLLECTIONS['erp_modules']}/{mod._key}",
                 })
+
 
             ec_mod_rel = graph.edge_collection(EDGE_COLLECTIONS["module_relation"])
             for rel in relationships.get("module_relationships", []):
@@ -483,18 +556,23 @@ class AnalysisService:
                         "relationship": rel.get("relationship"),
                     })
 
+
             logger.info(f"Persisted process {process_doc._key} to ArangoDB")
         except Exception as e:
             logger.error(f"ArangoDB persistence error: {e}", exc_info=True)
+
+
 
 
     def get_process(self, process_key: str) -> Dict[str, Any]:
         db  = get_db()
         col = db.collection
 
+
         process = col(COLLECTIONS["documents"]).get(process_key)
         if not process:
             return None
+
 
         steps = list(db.aql(
             "FOR s IN process_steps FILTER s.process_key == @key SORT s.step_number RETURN s",
@@ -509,11 +587,13 @@ class AnalysisService:
             {"key": process_key}
         ))
 
+
         top_targets = sorted(
             [{"title": s["title"], "actor": s["actor"],
               "automation_potential": s["automation_potential"]} for s in steps],
             key=lambda x: x["automation_potential"], reverse=True
         )[:5]
+
 
         return {
             "process":                {**process, "id": process["_key"]},
@@ -524,12 +604,16 @@ class AnalysisService:
         }
 
 
+
+
     def list_processes(self) -> List[Dict]:
         db   = get_db()
         docs = list(db.aql(
             "FOR p IN processes SORT p.created_at DESC LIMIT 50 RETURN p"
         ))
         return [{**d, "id": d["_key"]} for d in docs]
+
+
 
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -540,11 +624,13 @@ class AnalysisService:
         col = db.collection
         llm = get_mistral_client()
 
+
         # Resolve process key
         try:
             suggestion = col(COLLECTIONS["suggestions"]).get(_key)
         except Exception:
             suggestion = None
+
 
         if suggestion:
             actual_process_key = suggestion.get("process_key")
@@ -554,6 +640,7 @@ class AnalysisService:
             except Exception:
                 erp_mod = None
             actual_process_key = erp_mod.get("process_key") if erp_mod else _key
+
 
         steps = list(db.aql(
             "FOR s IN process_steps FILTER s.process_key == @key SORT s.step_number RETURN s",
@@ -566,30 +653,39 @@ class AnalysisService:
         process       = col(COLLECTIONS["documents"]).get(actual_process_key)
         process_title = process.get("title", "Business Process") if process else "Business Process"
 
+
         wf_type = _detect_workflow_type(process_title)
+
 
         # ── Inventory / order workflows → deterministic agentic graph ─────────
         if wf_type == "inventory":
             logger.info("Using agentic inventory workflow graph builder")
             return self._build_agentic_workflow_graph(process_title, steps, suggestions_data)
 
+
         # ── Generic → try LLM, fall back to sequential ───────────────────────
         try:
             result = llm.generate_react_flow(process_title, steps, suggestions_data)
 
+
             if not result.get("nodes") or not result.get("edges"):
                 raise ValueError("LLM returned empty graph")
+
 
             node_count = len([n for n in result["nodes"] if n.get("type") == "processNode"])
             if node_count < len(steps):
                 raise ValueError(f"Incomplete: {node_count}/{len(steps)} step nodes")
 
+
             logger.info(f"LLM graph: {len(result['nodes'])} nodes, {len(result['edges'])} edges")
             return result
+
 
         except Exception as e:
             logger.error(f"LLM graph failed: {e} — using sequential fallback")
             return self._build_sequential_fallback(steps, suggestions_data)
+
+
 
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -613,11 +709,14 @@ class AnalysisService:
         self, process_title: str, steps: list, suggestions: list
     ) -> Dict[str, Any]:
 
+
         nodes: list = []
         edges: list = []
 
+
         # ── Helpers ────────────────────────────────────────────────────────────
         def accent(p): return "#10B981" if p >= 80 else ("#F59E0B" if p >= 60 else "#EF4444")
+
 
         def grp(nid, label, x, y, w, h, icon="Database", color="#6366F1"):
             return {
@@ -626,6 +725,7 @@ class AnalysisService:
                 "style": {"width": w, "height": h, "zIndex": 0},
                 "data": {"label": label, "icon": icon, "accentColor": color},
             }
+
 
         def proc(nid, label, x, y, sd=None, parent=None, color="#10B981"):
             d = sd or {}
@@ -653,6 +753,7 @@ class AnalysisService:
                 n["extent"]     = "parent"
             return n
 
+
         def decision(nid, label, x, y):
             return {
                 "id": nid, "type": "decisionNode",
@@ -660,6 +761,7 @@ class AnalysisService:
                 "style": {"width": 200, "zIndex": 5},
                 "data": {"label": label, "accentColor": "#F59E0B"},
             }
+
 
         def agt(nid, title, x, y, desc="", tasks=None, atype="workflow_automation", color="#3B82F6"):
             return {
@@ -676,6 +778,7 @@ class AnalysisService:
                 },
             }
 
+
         def edg(eid, src, tgt, label="", stroke="#4B5563",
                 dashed=False, animated=True, sw=2):
             e = {
@@ -688,6 +791,7 @@ class AnalysisService:
                 e["style"]["strokeDasharray"] = "5 5"
             return e
 
+
         # ── Keyword step matcher ───────────────────────────────────────────────
         def find(kws, fallback_idx=0):
             for kw in kws:
@@ -695,6 +799,7 @@ class AnalysisService:
                     if kw.lower() in (s.get("title","") + s.get("description","")).lower():
                         return s
             return steps[fallback_idx] if steps and fallback_idx < len(steps) else {}
+
 
         # ── Map DB steps to semantic roles ─────────────────────────────────────
         s_val    = find(["validate", "order data", "completeness", "sales order"], 0)
@@ -712,6 +817,7 @@ class AnalysisService:
         s_gopt   = find(["generate option"], 7)
         s_prop   = find(["propose", "partial ship", "backorder"], 8)
 
+
         # ── Agent task lookup ──────────────────────────────────────────────────
         def sug_for(kws):
             for sg in suggestions:
@@ -720,9 +826,11 @@ class AnalysisService:
                     return sg
             return {}
 
+
         so_s  = sug_for(["validate", "sales order"])
         inv_s = sug_for(["inventory", "stock", "check"])
         ro_s  = sug_for(["reorder", "alternative", "lead time"])
+
 
         # ═══════════════════════════════════════════════════════════════════════
         # LANE 1 — Sales Order Agent
@@ -733,6 +841,7 @@ class AnalysisService:
                           s_val.get("title", "Validate Order Data"),
                           x=20, y=60, sd=s_val, parent="group-soa",
                           color=accent(s_val.get("automation_potential", 85))))
+
 
         # Rejection (standalone)
         nodes.append({
@@ -749,11 +858,13 @@ class AnalysisService:
             },
         })
 
+
         # ═══════════════════════════════════════════════════════════════════════
         # LANE 2 — Inventory Agent
         # ═══════════════════════════════════════════════════════════════════════
         nodes.append(grp("group-inv", "Inventory Agent",
                          x=60, y=280, w=400, h=430, icon="Database", color="#6366F1"))
+
 
         for nid, sd, default_lbl, yy in [
             ("step-qdb",  s_qdb, "Query Inventory DB",        60),
@@ -765,16 +876,19 @@ class AnalysisService:
                               x=20, y=yy, sd=sd, parent="group-inv",
                               color=accent(sd.get("automation_potential", 85))))
 
+
         # ═══════════════════════════════════════════════════════════════════════
         # DECISION NODE
         # ═══════════════════════════════════════════════════════════════════════
         nodes.append(decision("node-decision", "Stock Available?", x=210, y=750))
+
 
         # ═══════════════════════════════════════════════════════════════════════
         # LANE 3 — YES / Accept Flow
         # ═══════════════════════════════════════════════════════════════════════
         nodes.append(grp("group-yes", "Accept Flow",
                          x=60, y=970, w=400, h=580, icon="Layers", color="#16A34A"))
+
 
         for nid, sd, default_lbl, yy in [
             ("step-res",  s_res, "Reserve Stock",             60),
@@ -787,11 +901,13 @@ class AnalysisService:
                               x=20, y=yy, sd=sd, parent="group-yes",
                               color="#10B981"))
 
+
         # ═══════════════════════════════════════════════════════════════════════
         # LANE 4 — NO/PARTIAL / Alternatives Flow
         # ═══════════════════════════════════════════════════════════════════════
         nodes.append(grp("group-no", "Alternatives Flow",
                          x=530, y=970, w=400, h=640, icon="Layers", color="#F59E0B"))
+
 
         for nid, sd, default_lbl, yy in [
             ("step-alt",  s_alt,  "Consider Alternatives",   60),
@@ -804,6 +920,7 @@ class AnalysisService:
             nodes.append(proc(nid, sd.get("title", default_lbl),
                               x=20, y=yy, sd=sd, parent="group-no",
                               color="#F59E0B"))
+
 
         # ═══════════════════════════════════════════════════════════════════════
         # AGENT NODES
@@ -840,13 +957,16 @@ class AnalysisService:
             color="#8B5CF6",
         ))
 
+
         # ═══════════════════════════════════════════════════════════════════════
         # EDGES
         # ═══════════════════════════════════════════════════════════════════════
 
+
         # Agent triggers validate
         edges.append(edg("e-soa-val",    "agent-soa",    "step-validate",
                          label="triggers", stroke="#3B82F6", dashed=True))
+
 
         # Validate → VALID → Query DB
         edges.append(edg("e-val-qdb",    "step-validate","step-qdb",
@@ -854,6 +974,7 @@ class AnalysisService:
         # Validate → FAILED → Rejected
         edges.append(edg("e-val-rej",    "step-validate","node-rejected",
                          label="FAILED",   stroke="#EF4444", dashed=True))
+
 
         # Inventory agent sub-steps
         for eid, src, tgt in [
@@ -863,14 +984,17 @@ class AnalysisService:
         ]:
             edges.append(edg(eid, src, tgt, stroke="#4B5563"))
 
+
         # Determine → Decision
         edges.append(edg("e-det-dec",    "step-det",     "node-decision", stroke="#4B5563"))
+
 
         # Decision branches
         edges.append(edg("e-dec-yes",    "node-decision","step-res",
                          label="YES",          stroke="#16A34A", sw=2))
         edges.append(edg("e-dec-no",     "node-decision","step-alt",
                          label="NO / PARTIAL", stroke="#EF4444", sw=2))
+
 
         # YES path sequential
         for eid, src, tgt in [
@@ -880,6 +1004,7 @@ class AnalysisService:
             ("e-acc-not",  "step-acc",  "step-not"),
         ]:
             edges.append(edg(eid, src, tgt, stroke="#16A34A"))
+
 
         # NO path sequential
         for eid, src, tgt in [
@@ -891,6 +1016,7 @@ class AnalysisService:
         ]:
             edges.append(edg(eid, src, tgt, stroke="#F59E0B"))
 
+
         # Agent automation edges (dashed purple)
         for eid, src, tgt, lbl in [
             ("e-soa-val2",  "agent-soa", "step-validate","validates"),
@@ -901,6 +1027,7 @@ class AnalysisService:
             ("e-ro-lead",   "agent-ro",  "step-lead",    "calculates"),
         ]:
             edges.append(edg(eid, src, tgt, label=lbl, stroke="#8B5CF6", dashed=True))
+
 
         # Catch unmapped extra steps — add inside inventory lane
         mapped_nums = {
@@ -919,8 +1046,11 @@ class AnalysisService:
             edges.append(edg(f"e-extra-{i}", prev, nid, stroke="#4B5563"))
             prev = nid
 
+
         logger.info(f"Agentic graph built: {len(nodes)} nodes, {len(edges)} edges")
         return {"nodes": nodes, "edges": edges}
+
+
 
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -931,10 +1061,12 @@ class AnalysisService:
         nodes: list  = []
         edges: list  = []
 
+
         # Group by actor
         actor_groups: Dict[str, list] = {}
         for step in sorted_steps:
             actor_groups.setdefault(step.get("actor", "Process"), []).append(step)
+
 
         y_off = 60
         for actor, actor_steps in actor_groups.items():
@@ -973,6 +1105,7 @@ class AnalysisService:
                 })
             y_off += gh + 40
 
+
         for idx in range(len(sorted_steps) - 1):
             c, n = sorted_steps[idx], sorted_steps[idx+1]
             edges.append({
@@ -983,6 +1116,7 @@ class AnalysisService:
                 "label": "next", "zIndex": 10,
                 "style": {"stroke": "#4B5563", "strokeWidth": 2, "zIndex": 10},
             })
+
 
         for i, sug in enumerate(suggestions):
             target_num = sug.get("step_number") or sug.get("step_key", "")
@@ -1007,7 +1141,125 @@ class AnalysisService:
                               "strokeWidth": 2, "zIndex": 10},
                 })
 
+
         return {"nodes": nodes, "edges": edges}
+
+
+
+
+    def get_agent_architecture(self, suggestion_key: str) -> Dict[str, Any]:
+        db = get_db()
+        col = db.collection
+
+
+        # 1. Fetch suggestion
+        suggestion = col(COLLECTIONS["suggestions"]).get(suggestion_key)
+        if not suggestion:
+            return None
+
+
+        process_key = suggestion.get("process_key")
+        step_key    = suggestion.get("step_key")
+
+
+        # 2. Fetch step
+        step = col(COLLECTIONS["steps"]).get(step_key) if step_key else {}
+
+
+        # 3. Fetch ERP modules
+        erp_modules = list(db.aql(
+            "FOR m IN erp_modules FILTER m.process_key == @key RETURN m",
+            {"key": process_key}
+        ))
+
+
+        # Pick relevant module (basic logic)
+        erp_module_name = None
+        if step and step.get("erp_module"):
+            erp_module_name = step.get("erp_module")
+        elif erp_modules:
+            erp_module_name = erp_modules[0].get("module_name")
+
+
+        # 4. Build dynamic architecture
+        architecture = {
+            "agent_cluster_architecture": {
+                "operating_model": suggestion.get("agent_type", "workflow_automation").replace("_", " ").title(),
+                "erp_module": erp_module_name or "General",
+
+
+                "architecture_layers": [
+                    {
+                        "title": "User Interaction Layer",
+                        "description": f"Handles interaction for step '{step.get('title', '')}', including monitoring and manual overrides."
+                    },
+                    {
+                        "title": "Agent Orchestration",
+                        "description": f"Executes '{suggestion.get('title')}' using automation logic, retries, and workflow coordination."
+                    },
+                    {
+                        "title": "ERP Module Integration",
+                        "description": f"Integrates with ERP module '{erp_module_name}' to execute transactions and sync data."
+                    },
+                    {
+                        "title": "Governance / Observability",
+                        "description": "Tracks logs, monitoring, SLA compliance, and audit trails."
+                    }
+                ],
+
+
+                "erp_context": [
+                    {
+                        "title": "System Configuration",
+                        "description": "Includes API configs, authentication, and ERP mappings."
+                    },
+                    {
+                        "title": "Connection Layer",
+                        "description": "Handles secure API communication with retry and pooling."
+                    },
+                    {
+                        "title": "Access & Security",
+                        "description": "Role-based access, encryption, and audit compliance."
+                    }
+                ],
+
+
+                "deployment_steps": [
+                    {
+                        "id": 1,
+                        "label": "Trigger",
+                        "description": f"Triggered from step '{step.get('title', '')}'."
+                    },
+                    {
+                        "id": 2,
+                        "label": "Validate",
+                        "description": "Validates inputs and business rules."
+                    },
+                    {
+                        "id": 3,
+                        "label": "Execute",
+                        "description": suggestion.get("description", "")
+                    },
+                    {
+                        "id": 4,
+                        "label": "Verify",
+                        "description": "Checks output accuracy and consistency."
+                    },
+                    {
+                        "id": 5,
+                        "label": "Complete",
+                        "description": "Stores results and notifies stakeholders."
+                    }
+                ]
+            }
+        }
+
+
+        return architecture
+
+
+
+
 
 
 def generate_graph_html(process_key, steps, relationships):
@@ -1015,11 +1267,14 @@ def generate_graph_html(process_key, steps, relationships):
     os.makedirs(graph_folder, exist_ok=True)
     file_path = os.path.join(graph_folder, "graph.html")
 
+
     net = Network(height="750px", width="100%", directed=True)
+
 
     for step in steps:
         net.add_node(step.step_number, label=step.title,
                      title=step.description, color="#97c2fc")
+
 
     step_sequences = relationships.get("step_sequences", [])
     if step_sequences:
@@ -1030,9 +1285,13 @@ def generate_graph_html(process_key, steps, relationships):
         for i in range(len(steps) - 1):
             net.add_edge(steps[i].step_number, steps[i+1].step_number)
 
+
     net.barnes_hut()
     net.write_html(file_path)
     return file_path
 
 
+
+
 analysis_service = AnalysisService()
+

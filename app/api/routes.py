@@ -1,7 +1,3 @@
-"""
-Flask REST API routes for Process Agentifier.
-"""
-
 import os
 import logging
 from app.core.rag_service import rag_query
@@ -27,8 +23,6 @@ def allowed_file(filename: str) -> bool:
 @api_bp.get("/health")
 def health():
     return jsonify({"status": "ok", "service": "process-agentifier"})
-
-
 
 
 @api_bp.route("/test-db", methods=["GET"])
@@ -185,21 +179,6 @@ def get_automation(process_key: str):
         return jsonify({"error": str(e)}), 500
 
 
-# @api_bp.get("/processes/<process_key>/flow")
-# def get_react_flow(process_key: str):
-#     """
-#     Returns the process data mapped specifically for the React Flow frontend.
-#     """
-#     try:
-#         flow_data = analysis_service.get_react_flow_data(process_key)
-#         if not flow_data["nodes"]:
-#             return jsonify({"error": "Process flow not found"}), 404
-            
-#         return jsonify(flow_data)
-#     except Exception as e:
-#         logger.error(f"Get React flow error: {e}", exc_info=True)
-#         return jsonify({"error": "Could not fetch process flow data"}), 500
-
 @api_bp.get("/processes/<_key>/flow")
 def get_react_flow(_key: str):
     """
@@ -217,12 +196,8 @@ def get_react_flow(_key: str):
         logger.error(f"Get React flow error: {e}", exc_info=True)
         return jsonify({"error": "Could not fetch process flow data"}), 500
 
-
-
-
     
 # ── RAG Chat ──────────────────────────────────────────────────────────────
-
 @api_bp.post("/chat")
 def chat():
     data = request.json
@@ -245,3 +220,20 @@ def chat():
         "answer": response,
         "graph_url": graph_url   
     })
+
+@api_bp.get("/suggestions/<suggestion_key>/architecture")
+def get_agent_architecture(suggestion_key: str):
+    try:
+        result = analysis_service.get_agent_architecture(suggestion_key)
+
+        if not result:
+            return jsonify({"error": "Suggestion not found"}), 404
+
+        return jsonify(result)
+
+    except Exception as e:
+        logger.error(f"Architecture fetch error: {e}", exc_info=True)
+        return jsonify({"error": "Could not fetch architecture"}), 500
+
+
+

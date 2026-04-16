@@ -829,3 +829,81 @@ IMPORTANT RULES:
 - Ensure all 4 categories are present
 - No extra text outside JSON
 """
+
+
+def build_agent_architecture_prompt(suggestion, step, erp_modules):
+    import json
+
+    return f"""
+You are a senior enterprise AI architect.
+
+Your task is to design an agent cluster architecture for the given automation suggestion.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STRICT OUTPUT RULES (VERY IMPORTANT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Return ONLY valid JSON
+- DO NOT include markdown (no ``` or ```json)
+- DO NOT include explanations or extra text
+- DO NOT wrap the JSON in quotes
+- DO NOT use trailing commas
+- Ensure the JSON is directly parsable using json.loads()
+- If JSON is invalid, the response will be rejected
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INPUT DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Suggestion:
+{json.dumps(suggestion, indent=2)}
+
+Step:
+{json.dumps(step, indent=2)}
+
+ERP Modules:
+{json.dumps(erp_modules[:3], indent=2)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INSTRUCTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Design a practical enterprise-grade architecture
+- Use real-world ERP + automation concepts (SAP, APIs, RPA, workflows)
+- Keep descriptions concise but meaningful
+- Ensure all fields are filled
+- Maintain consistency across layers
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT FORMAT (STRICT JSON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{
+  "agent_cluster_architecture": {{
+    "operating_model": "string",
+    "erp_module": "string",
+
+    "architecture_layers": [
+      {{
+        "title": "string",
+        "description": "string"
+      }}
+    ],
+
+    "erp_context": [
+      {{
+        "title": "string",
+        "description": "string"
+      }}
+    ],
+
+    "deployment_steps": [
+      {{
+        "id": 1,
+        "label": "string",
+        "description": "string"
+      }}
+    ]
+  }}
+}}
+""".strip()
+
+
