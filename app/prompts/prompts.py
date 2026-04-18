@@ -907,3 +907,387 @@ OUTPUT FORMAT (STRICT JSON)
 """.strip()
 
 
+# def build_architecture_prompt(suggestion, step, process):
+#     return f"""
+# You are a principal AI architect designing a fully dynamic enterprise-grade agentic architecture.
+
+# STRICT RULES:
+# - Return ONLY valid JSON
+# - NO explanation
+# - NO markdown
+# - JSON must start with {{ and end with }}
+# - Do NOT hardcode fixed nodes
+
+# OBJECTIVE:
+# Generate a React Flow architecture dynamically based on the given context.
+
+# DYNAMIC DESIGN LOGIC:
+
+# 1. Identify SYSTEM COMPONENTS from context:
+#    - Inputs (email, ERP, chat, files, APIs)
+#    - Core processing steps → convert into AGENTS
+#    - Decision points → validation agents
+#    - External systems → ERP, APIs
+#    - Data needs → DBs, vector stores, memory
+
+# 2. NODE GENERATION RULES:
+#    - Total nodes: 8 to 14 (dynamic)
+#    - MUST ALWAYS INCLUDE:
+#      - API Gateway
+#      - Agentic Orchestrator
+#    - Agents MUST be derived from process steps dynamically
+#    - Add tools (DB, vector store) ONLY if needed
+
+# 3. LAYERED POSITIONING (MANDATORY):
+
+#    INPUT LAYER:
+#    x: 0–200
+
+#    INTERFACE LAYER:
+#    x: 250–450
+
+#    ORCHESTRATION LAYER:
+#    x: 500–700
+
+#    AGENT LAYER:
+#    x: 750–1050
+
+#    DATA/TOOLS LAYER:
+#    x: 500–900 (lower y)
+
+#    OUTPUT LAYER:
+#    x: 1100–1400
+
+#    - Dynamically space nodes vertically (y-axis)
+#    - Avoid overlap
+
+# 4. EDGE RULES:
+
+#    - Primary flow:
+#      Inputs → API Gateway → Orchestrator → Agents → Outputs
+
+#    - Orchestrator MUST connect to ALL agents
+
+#    - Agents:
+#      - Can call other agents IF process requires
+#      - Can connect to DB/tools
+
+#    - Add feedback loops ONLY if logical
+
+  
+
+
+# MANDATORY ENTERPRISE COMPONENTS (ALWAYS INCLUDE):
+
+# INPUT CHANNELS:
+# - Email Input (PDF)
+# - Chat Input
+# - ERP System Input
+
+# CONNECTOR LAYER:
+# - Email Connector
+# - Chat/Slack Connector
+# - ERP API Connector
+
+# INTERFACE LAYER:
+# - Web / Mobile UI
+# - Vendor Interaction Portal (Human Node)
+
+# CORE PLATFORM:
+# - API Gateway (MANDATORY)
+# - Agentic Orchestrator (MANDATORY)
+# - LLM Planner (if reasoning exists)
+
+# AGENT LAYER:
+# - Derived dynamically from process
+# - Minimum 2 agents
+
+# SHARED CONTEXT & TOOLS (MANDATORY):
+# - Vector Database (Knowledge Base)
+# - Memory Store
+# - Relational Database
+# - Tool Integration Layer / Middleware
+# - Safety / Guardrails
+
+# INFRASTRUCTURE LAYER (MANDATORY):
+
+# - Kubernetes Cluster (EKS/AKS/GKE)
+#   - Hosts orchestrator and all agents
+#   - Acts as compute layer
+
+# - Redis Cache
+#   - Used for session state, orchestration memory, fast retrieval
+
+# - Event Streaming (Kafka or Pub/Sub)
+#   - Used for async communication between agents and services
+
+# - Object Storage (S3 / Blob Storage)
+#   - Stores documents, artifacts, intermediate outputs
+
+# - Logging & Monitoring
+#   - Audit logs, observability (CloudWatch / ELK)
+
+# INFRA RULES:
+
+# - Orchestrator MUST run inside Kubernetes
+# - All agents MUST connect to Kubernetes layer
+# - Orchestrator SHOULD use Redis for state/cache
+# - Agents SHOULD publish/consume via Kafka for async workflows
+# - Outputs SHOULD be stored in Object Storage
+
+# DATA STORAGE:
+# - Temporary Storage (if documents involved)
+# - ERP Database
+
+# OUTPUT LAYER:
+# - Document Store
+# - ERP Update System
+# - Final Business Output (e.g., Payment / PO / Shipping)
+
+# HUMAN-IN-THE-LOOP:
+# - Add if any approval / exception exists
+
+# 5. SEMANTIC NAMING:
+
+#    DO NOT use generic names like:
+#    ❌ Agent1, NodeA
+
+#    USE:
+#    ✔ PR Intake Agent
+#    ✔ Sourcing Agent
+#    ✔ Validation Agent
+#    ✔ Knowledge Base
+#    ✔ Memory Store
+
+# 6. TYPE MAPPING:
+
+#    - input → external triggers
+#    - system → infra (API GW, DB, orchestrator)
+#    - agent → AI/logic units
+#    - human → approval / HITL
+#    - output → final systems
+# ARCHITECTURE STYLE:
+
+# - Think like AWS reference architecture
+# - Not just workflow — build FULL PLATFORM
+# - Include supporting systems (DBs, UI, connectors)
+# - Show where data is stored, not just processed
+
+# OUTPUT FORMAT:
+
+# {{
+#   "nodes": [
+#     {{
+#       "id": "string",
+#       "type": "input|system|agent|human|output",
+#       "data": {{
+#         "label": "string",
+#         "description": "context-aware description"
+#       }},
+#       "position": {{ "x": number, "y": number }}
+#     }}
+#   ],
+#   "edges": [
+#     {{
+#       "id": "string",
+#       "source": "node_id",
+#       "target": "node_id",
+#       "label": "meaningful data flow"
+#     }}
+#   ]
+# }}
+
+# CONTEXT:
+# Suggestion:
+# {json.dumps(suggestion)}
+
+# Step:
+# {json.dumps(step)}
+
+# Process:
+# {json.dumps(process)}
+
+# INTELLIGENCE MODE:
+
+# - Infer architecture like a real system designer
+# - If process is complex → more agents
+# - If simple → fewer nodes
+# - If documents involved → add OCR agent
+# - If reasoning required → add LLM planner
+# - If memory required → add vector DB
+# - If approvals required → add human-in-loop
+
+# FINAL GOAL:
+# Create a clean, scalable, production-grade architecture that visually resembles AWS/Azure diagrams but is fully dynamic.
+# """
+
+
+
+def build_architecture_prompt(suggestion, step, process):
+    return f"""
+You are a principal AI platform architect designing a PRODUCTION-DEPLOYABLE agentic system.
+
+STRICT RULES:
+- Return ONLY valid JSON
+- NO explanation
+- NO markdown
+- JSON must start with {{ and end with }}
+- Every node must represent a REAL deployable component
+
+OBJECTIVE:
+Generate a React Flow architecture that maps directly to deployable infrastructure and services.
+
+--------------------------------------------------
+CORE DESIGN PRINCIPLES:
+
+- Every agent = containerized microservice
+- Orchestrator = stateful service
+- Communication = API (sync) + Kafka (async)
+- State = Redis + DB
+- Deployment = Kubernetes
+
+--------------------------------------------------
+MANDATORY ENTERPRISE COMPONENTS:
+
+INPUT CHANNELS:
+- Email Input (PDF)
+- Chat Input
+- ERP System
+
+CONNECTORS:
+- Email Ingestion Service (Lambda / API)
+- Chat Connector (Webhook Service)
+- ERP API Connector
+
+INTERFACE:
+- Web / Mobile UI
+- Vendor Portal (Human-in-loop)
+
+CORE PLATFORM:
+- API Gateway (auth, routing)
+- Agentic Orchestrator (state machine service)
+- LLM Planner Service
+
+AGENTS (DYNAMIC):
+- Derived from process
+- Each agent = independent microservice
+- Minimum 2 agents
+
+SHARED CONTEXT:
+- Vector DB (semantic search)
+- Memory Store (conversation/session)
+- Relational DB (transactions)
+- Integration Middleware (API orchestration)
+- Guardrails Service (security + validation)
+
+INFRASTRUCTURE LAYER (MANDATORY):
+
+- Kubernetes Cluster
+  - Hosts ALL services
+
+- Redis Cluster
+  - Orchestration state
+  - Session cache
+
+- Kafka / Event Bus
+  - Async messaging between services
+
+- Object Storage (S3/Blob)
+  - Documents, artifacts
+
+- Observability Stack
+  - Logging + monitoring
+
+--------------------------------------------------
+DEPLOYMENT RULES:
+
+- All agents + orchestrator run INSIDE Kubernetes
+- Each agent = separate pod/service
+- Orchestrator communicates:
+  - Sync → REST via API Gateway
+  - Async → Kafka events
+
+- Redis used for:
+  - workflow state
+  - caching
+
+- Kafka used for:
+  - decoupled execution
+  - retries / event-driven flows
+
+- DBs must be explicitly connected
+
+--------------------------------------------------
+OUTPUT SYSTEMS:
+
+- Document Store
+- ERP Update Service
+- Final Business Output (PO / Payment / Shipping)
+
+--------------------------------------------------
+EDGE RULES:
+
+- Label edges as:
+  - "sync API"
+  - "async event"
+  - "DB read/write"
+
+- Flow:
+  Inputs → Gateway → Orchestrator → Agents → Outputs
+
+- Orchestrator must control ALL agents
+
+--------------------------------------------------
+POSITIONING (React Flow):
+
+INPUT: x 0–200  
+INTERFACE: x 250–450  
+CORE: x 500–750  
+AGENTS: x 800–1100  
+INFRA: x 600–1000, y lower  
+OUTPUT: x 1100–1400  
+
+--------------------------------------------------
+OUTPUT FORMAT:
+
+{{
+  "nodes": [
+    {{
+      "id": "string",
+      "type": "input|system|agent|human|output",
+      "data": {{
+        "label": "string",
+        "description": "deployable service description"
+      }},
+      "position": {{ "x": number, "y": number }}
+    }}
+  ],
+  "edges": [
+    {{
+      "id": "string",
+      "source": "node_id",
+      "target": "node_id",
+      "label": "sync API | async event | DB read/write"
+    }}
+  ]
+}}
+
+--------------------------------------------------
+CONTEXT:
+
+Suggestion:
+{json.dumps(suggestion)}
+
+Step:
+{json.dumps(step)}
+
+Process:
+{json.dumps(process)}
+
+--------------------------------------------------
+FINAL EXPECTATION:
+
+- Output should map 1:1 to real deployment
+- No abstract nodes
+- Must resemble AWS/Azure production architecture
+"""

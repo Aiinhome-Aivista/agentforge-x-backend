@@ -14,6 +14,7 @@ from app.db.arango import get_db, COLLECTIONS, EDGE_COLLECTIONS
 import json
 from app.db.db_connection import get_mysql_connection
 from app.core.toc_analyzer import TOCAnalyzer
+from app.prompts.prompts import build_architecture_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -1145,121 +1146,179 @@ class AnalysisService:
         return {"nodes": nodes, "edges": edges}
 
 
+    # def get_agent_architecture(self, suggestion_key: str) -> Dict[str, Any]:
+    #     db = get_db()
+    #     col = db.collection
 
 
-    def get_agent_architecture(self, suggestion_key: str) -> Dict[str, Any]:
+    #     # 1. Fetch suggestion
+    #     suggestion = col(COLLECTIONS["suggestions"]).get(suggestion_key)
+    #     if not suggestion:
+    #         return None
+
+
+    #     process_key = suggestion.get("process_key")
+    #     step_key    = suggestion.get("step_key")
+
+
+    #     # 2. Fetch step
+    #     step = col(COLLECTIONS["steps"]).get(step_key) if step_key else {}
+
+
+    #     # 3. Fetch ERP modules
+    #     erp_modules = list(db.aql(
+    #         "FOR m IN erp_modules FILTER m.process_key == @key RETURN m",
+    #         {"key": process_key}
+    #     ))
+
+
+    #     # Pick relevant module (basic logic)
+    #     erp_module_name = None
+    #     if step and step.get("erp_module"):
+    #         erp_module_name = step.get("erp_module")
+    #     elif erp_modules:
+    #         erp_module_name = erp_modules[0].get("module_name")
+
+
+    #     # 4. Build dynamic architecture
+    #     architecture = {
+    #         "agent_cluster_architecture": {
+    #             "operating_model": suggestion.get("agent_type", "workflow_automation").replace("_", " ").title(),
+    #             "erp_module": erp_module_name or "General",
+
+
+    #             "architecture_layers": [
+    #                 {
+    #                     "title": "User Interaction Layer",
+    #                     "description": f"Handles interaction for step '{step.get('title', '')}', including monitoring and manual overrides."
+    #                 },
+    #                 {
+    #                     "title": "Agent Orchestration",
+    #                     "description": f"Executes '{suggestion.get('title')}' using automation logic, retries, and workflow coordination."
+    #                 },
+    #                 {
+    #                     "title": "ERP Module Integration",
+    #                     "description": f"Integrates with ERP module '{erp_module_name}' to execute transactions and sync data."
+    #                 },
+    #                 {
+    #                     "title": "Governance / Observability",
+    #                     "description": "Tracks logs, monitoring, SLA compliance, and audit trails."
+    #                 }
+    #             ],
+
+
+    #             "erp_context": [
+    #                 {
+    #                     "title": "System Configuration",
+    #                     "description": "Includes API configs, authentication, and ERP mappings."
+    #                 },
+    #                 {
+    #                     "title": "Connection Layer",
+    #                     "description": "Handles secure API communication with retry and pooling."
+    #                 },
+    #                 {
+    #                     "title": "Access & Security",
+    #                     "description": "Role-based access, encryption, and audit compliance."
+    #                 }
+    #             ],
+
+
+    #             "deployment_steps": [
+    #                 {
+    #                     "id": 1,
+    #                     "label": "Trigger",
+    #                     "description": f"Triggered from step '{step.get('title', '')}'."
+    #                 },
+    #                 {
+    #                     "id": 2,
+    #                     "label": "Validate",
+    #                     "description": "Validates inputs and business rules."
+    #                 },
+    #                 {
+    #                     "id": 3,
+    #                     "label": "Execute",
+    #                     "description": suggestion.get("description", "")
+    #                 },
+    #                 {
+    #                     "id": 4,
+    #                     "label": "Verify",
+    #                     "description": "Checks output accuracy and consistency."
+    #                 },
+    #                 {
+    #                     "id": 5,
+    #                     "label": "Complete",
+    #                     "description": "Stores results and notifies stakeholders."
+    #                 }
+    #             ]
+    #         }
+    #     }
+
+
+    #     return architecture
+
+
+    def get_agent_architecture(self, suggestion_key: str):
         db = get_db()
         col = db.collection
-
+        llm = get_mistral_client()
 
         # 1. Fetch suggestion
         suggestion = col(COLLECTIONS["suggestions"]).get(suggestion_key)
         if not suggestion:
             return None
 
-
-        process_key = suggestion.get("process_key")
-        step_key    = suggestion.get("step_key")
-
-
         # 2. Fetch step
-        step = col(COLLECTIONS["steps"]).get(step_key) if step_key else {}
+        step = col(COLLECTIONS["steps"]).get(suggestion.get("step_key"))
 
+        # 3. Fetch process
+        process = col(COLLECTIONS["documents"]).get(suggestion.get("process_key"))
 
-        # 3. Fetch ERP modules
-        erp_modules = list(db.aql(
-            "FOR m IN erp_modules FILTER m.process_key == @key RETURN m",
-            {"key": process_key}
-        ))
+        # 4. Build dynamic prompt
+        prompt = build_architecture_prompt(suggestion, step, process)
 
+        # 5. LLM call
+        response = llm._chat(
+            "You are an expert AI architect. Return ONLY valid JSON.",
+            prompt,
+            temperature=0.2
+        )
 
-        # Pick relevant module (basic logic)
-        erp_module_name = None
-        if step and step.get("erp_module"):
-            erp_module_name = step.get("erp_module")
-        elif erp_modules:
-            erp_module_name = erp_modules[0].get("module_name")
+        print("RAW ARCHITECTURE RESPONSE:\n", response[:2000])
 
+        parsed = llm._parse_json(response)
 
-        # 4. Build dynamic architecture
-        architecture = {
-            "agent_cluster_architecture": {
-                "operating_model": suggestion.get("agent_type", "workflow_automation").replace("_", " ").title(),
-                "erp_module": erp_module_name or "General",
+        # ✅ VALIDATION FIX
+        if not isinstance(parsed, dict) or "nodes" not in parsed:
+            logger.error("Invalid architecture JSON → fallback used")
 
-
-                "architecture_layers": [
+            return {
+                "nodes": [
                     {
-                        "title": "User Interaction Layer",
-                        "description": f"Handles interaction for step '{step.get('title', '')}', including monitoring and manual overrides."
+                        "id": "start",
+                        "type": "input",
+                        "data": {"label": "Start"},
+                        "position": {"x": 0, "y": 0}
                     },
                     {
-                        "title": "Agent Orchestration",
-                        "description": f"Executes '{suggestion.get('title')}' using automation logic, retries, and workflow coordination."
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": suggestion.get("title", "Agent")},
+                        "position": {"x": 200, "y": 100}
                     },
                     {
-                        "title": "ERP Module Integration",
-                        "description": f"Integrates with ERP module '{erp_module_name}' to execute transactions and sync data."
-                    },
-                    {
-                        "title": "Governance / Observability",
-                        "description": "Tracks logs, monitoring, SLA compliance, and audit trails."
+                        "id": "erp",
+                        "type": "system",
+                        "data": {"label": "ERP System"},
+                        "position": {"x": 400, "y": 200}
                     }
                 ],
-
-
-                "erp_context": [
-                    {
-                        "title": "System Configuration",
-                        "description": "Includes API configs, authentication, and ERP mappings."
-                    },
-                    {
-                        "title": "Connection Layer",
-                        "description": "Handles secure API communication with retry and pooling."
-                    },
-                    {
-                        "title": "Access & Security",
-                        "description": "Role-based access, encryption, and audit compliance."
-                    }
-                ],
-
-
-                "deployment_steps": [
-                    {
-                        "id": 1,
-                        "label": "Trigger",
-                        "description": f"Triggered from step '{step.get('title', '')}'."
-                    },
-                    {
-                        "id": 2,
-                        "label": "Validate",
-                        "description": "Validates inputs and business rules."
-                    },
-                    {
-                        "id": 3,
-                        "label": "Execute",
-                        "description": suggestion.get("description", "")
-                    },
-                    {
-                        "id": 4,
-                        "label": "Verify",
-                        "description": "Checks output accuracy and consistency."
-                    },
-                    {
-                        "id": 5,
-                        "label": "Complete",
-                        "description": "Stores results and notifies stakeholders."
-                    }
+                "edges": [
+                    {"id": "e1", "source": "start", "target": "agent"},
+                    {"id": "e2", "source": "agent", "target": "erp"}
                 ]
             }
-        }
 
-
-        return architecture
-
-
-
-
+        return parsed
 
 
 def generate_graph_html(process_key, steps, relationships):
@@ -1289,8 +1348,6 @@ def generate_graph_html(process_key, steps, relationships):
     net.barnes_hut()
     net.write_html(file_path)
     return file_path
-
-
 
 
 analysis_service = AnalysisService()
