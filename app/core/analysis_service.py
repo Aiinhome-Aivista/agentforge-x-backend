@@ -22,15 +22,29 @@ logger = logging.getLogger(__name__)
 
 import re
 
+from datetime import datetime
 
+def save_uploaded_files(files: List[Tuple[bytes, str]]) -> str:
+    """
+    Saves uploaded files into uploads/<timestamp>/ with original filenames.
+    Returns the folder path.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_folder = os.path.join("uploads", timestamp)
+
+    os.makedirs(base_folder, exist_ok=True)
+
+    for file_bytes, filename in files:
+        file_path = os.path.join(base_folder, filename)
+
+        with open(file_path, "wb") as f:
+            f.write(file_bytes)
+
+    return base_folder
 
 
 def escape_braces(text: str) -> str:
     return str(text).replace("{", "{{").replace("}", "}}")
-
-
-
-
 
 
 def slugify(text):
@@ -38,9 +52,7 @@ def slugify(text):
     text = re.sub(r'[^a-z0-9]+', '-', text)
     return text.strip('-')
 
-
 used_edge_ids = set()
-
 
 def unique_edge_id(base):
     i = 1
@@ -51,16 +63,12 @@ def unique_edge_id(base):
     used_edge_ids.add(new_id)
     return new_id
 
-
 def serialize(obj):
     if isinstance(obj, list):
         return [serialize(o) for o in obj]
     if hasattr(obj, "__dict__"):
         return obj.__dict__
     return obj
-
-
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Workflow type detector
@@ -89,9 +97,11 @@ class AnalysisService:
         files: List[Tuple[bytes, str]],
         user_input: str = ""
     ) -> AnalysisResult:
-        """
-        Full pipeline: parse -> extract -> score -> suggest -> TOC -> persist -> return.
-        """
+
+        # 🔥 NEW: Save uploaded raw files
+        upload_folder = save_uploaded_files(files)
+        logger.info(f"Files saved in: {upload_folder}")
+        
         db  = get_db()
         llm = get_mistral_client()
 
