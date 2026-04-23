@@ -53,6 +53,8 @@ class ProcessStep:
     actor: str
     step_type: str
     automation_potential: float
+    lane: Optional[str] = None
+    role_type: Optional[str] = "human"
     automation_reasoning: str = ""
     _key: str = field(default_factory=_new_key)
 
@@ -152,6 +154,7 @@ class AnalysisResult:
     graph_url: Optional[str] = None,
     toc_analysis: Dict = {},
     workflow_layers: Dict = {},
+    session_id: Optional[str] = None, 
     metrics: Dict[str, Any] = field(default_factory=dict)
 
     def to_api(self) -> Dict[str, Any]:
@@ -163,5 +166,6 @@ class AnalysisResult:
             "key_insights": [asdict(i) for i in self.key_insights],
             "top_automation_targets": self.top_automation_targets,
             "graph_url": self.graph_url,
+            "session_id": self.session_id,
             "metrics": self.metrics 
         }

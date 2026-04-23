@@ -14,7 +14,7 @@ from app.db.arango import get_db, COLLECTIONS, EDGE_COLLECTIONS
 import json
 from app.db.db_connection import get_mysql_connection
 from app.core.toc_analyzer import TOCAnalyzer
-from app.prompts.prompts import build_architecture_prompt
+from app.prompts.prompts import build_architecture_prompt, build_react_flow_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -87,16 +87,50 @@ def _detect_workflow_type(process_title: str) -> str:
     return "generic"
 
 
-
-
 class AnalysisService:
-
 
     def analyze(
         self,
         files: List[Tuple[bytes, str]],
-        user_input: str = ""
+        user_input: str = "",
+        session_id: str = None
     ) -> AnalysisResult:
+         
+         # 🔥 NEW: Check existing session in MySQL
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            try:
+                mysql_db = get_mysql_connection()
+                cursor = mysql_db.cursor(dictionary=True)
+
+                cursor.execute("""
+                    SELECT * FROM analysis_results
+                    WHERE session_id = %s
+                    LIMIT 1
+                """, (session_id,))
+
+                existing = cursor.fetchone()
+
+                cursor.close()
+                mysql_db.close()
+
+                if existing:
+                    logger.info(f"✅ Existing result found for session_id={session_id}")
+
+                    return AnalysisResult(
+                        process=json.loads(existing["process"]),
+                        steps=json.loads(existing["steps"]),
+                        suggestions=json.loads(existing["suggestions"]),
+                        erp_modules=json.loads(existing["erp_modules"]),
+                        key_insights=json.loads(existing["key_insights"]),
+                        top_automation_targets=json.loads(existing["automation_targets"]),
+                        graph_url=existing["graph_url"],
+                        toc_analysis=json.loads(existing["toc_analysis"]),
+                        session_id=session_id
+                    )
+
+            except Exception as e:
+                logger.error(f"MySQL fetch failed: {e}")
 
         # 🔥 NEW: Save uploaded raw files
         upload_folder = save_uploaded_files(files)
@@ -291,8 +325,9 @@ class AnalysisService:
                 title=raw.get("title", ""),
                 description=raw.get("description", ""),
                 actor=raw.get("actor", "Unknown"),
-                step_type=resolve_step_type(raw.get("step_type", "manual"),
-                                            raw.get("automation_potential", 0)),
+                lane=raw.get("lane", raw.get("actor")),   
+                role_type=raw.get("role_type", "human"),
+                step_type=resolve_step_type(raw.get("step_type", "manual"),raw.get("automation_potential", 0)),
                 automation_potential=raw.get("automation_potential", 0),
                 automation_reasoning=raw.get("automation_reasoning", ""),
                 inputs=raw.get("inputs", []),
@@ -431,8 +466,8 @@ class AnalysisService:
             cursor.execute("""
                 INSERT INTO analysis_results
                 (erp_modules, graph_url, key_insights, process, steps, suggestions,
-                 automation_targets, toc_analysis)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 automation_targets, toc_analysis,session_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s,%s)
             """, (
                 json.dumps(serialize(erp_module_objects)),
                 graph_url,
@@ -442,6 +477,7 @@ class AnalysisService:
                 json.dumps(serialize(suggestion_objects)),
                 json.dumps(top_targets),
                 json.dumps(toc_dict),
+                session_id,
             ))
             mysql_db.commit()
             cursor.close()
@@ -461,9 +497,8 @@ class AnalysisService:
             graph_url=graph_url,
             workflow_layers=categorization,
             toc_analysis=toc_dict,
+            session_id=session_id,
         )
-
-
 
 
     def _persist(self, db, process_doc, steps, suggestions,
@@ -573,8 +608,6 @@ class AnalysisService:
             logger.error(f"ArangoDB persistence error: {e}", exc_info=True)
 
 
-
-
     def get_process(self, process_key: str) -> Dict[str, Any]:
         db  = get_db()
         col = db.collection
@@ -615,17 +648,12 @@ class AnalysisService:
         }
 
 
-
-
     def list_processes(self) -> List[Dict]:
         db   = get_db()
         docs = list(db.aql(
             "FOR p IN processes SORT p.created_at DESC LIMIT 50 RETURN p"
         ))
         return [{**d, "id": d["_key"]} for d in docs]
-
-
-
 
     # ─────────────────────────────────────────────────────────────────────────
     # get_react_flow_data
@@ -670,8 +698,12 @@ class AnalysisService:
 
         # ── Inventory / order workflows → deterministic agentic graph ─────────
         if wf_type == "inventory":
-            logger.info("Using agentic inventory workflow graph builder")
-            return self._build_agentic_workflow_graph(process_title, steps, suggestions_data)
+            logger.info("Using LLM lane-based workflow builder (inventory override)")
+
+            result = llm.generate_react_flow(process_title, steps, suggestions_data)
+
+
+            return result
 
 
         # ── Generic → try LLM, fall back to sequential ───────────────────────
@@ -679,16 +711,19 @@ class AnalysisService:
             result = llm.generate_react_flow(process_title, steps, suggestions_data)
 
 
-            if not result.get("nodes") or not result.get("edges"):
-                raise ValueError("LLM returned empty graph")
 
+            if not result.get("lanes") or not result.get("flow"):
+                raise ValueError("LLM returned invalid lane-based graph")
 
-            node_count = len([n for n in result["nodes"] if n.get("type") == "processNode"])
+            # count nodes inside lanes
+            node_count = sum(len(l.get("nodes", [])) for l in result.get("lanes", []))
+
             if node_count < len(steps):
-                raise ValueError(f"Incomplete: {node_count}/{len(steps)} step nodes")
+                raise ValueError(f"Incomplete: {node_count}/{len(steps)} nodes")
+
+            logger.info(f"Lane graph: {len(result['lanes'])} lanes, {len(result['flow'])} flows")
 
 
-            logger.info(f"LLM graph: {len(result['nodes'])} nodes, {len(result['edges'])} edges")
             return result
 
 
@@ -697,7 +732,7 @@ class AnalysisService:
             return self._build_sequential_fallback(steps, suggestions_data)
 
 
-
+    
 
     # ─────────────────────────────────────────────────────────────────────────
     # _build_agentic_workflow_graph
@@ -1336,29 +1371,51 @@ def generate_graph_html(process_key, steps, relationships):
     os.makedirs(graph_folder, exist_ok=True)
     file_path = os.path.join(graph_folder, "graph.html")
 
-
     net = Network(height="750px", width="100%", directed=True)
 
-
+    # ✅ Add nodes
+    valid_nodes = set()
     for step in steps:
-        net.add_node(step.step_number, label=step.title,
-                     title=step.description, color="#97c2fc")
+        node_id = step.step_number
+        valid_nodes.add(node_id)
 
+        net.add_node(
+            node_id,
+            label=step.title,
+            title=step.description,
+            color="#97c2fc"
+        )
 
+    # ✅ Add edges safely
     step_sequences = relationships.get("step_sequences", [])
+
     if step_sequences:
         for rel in step_sequences:
-            net.add_edge(rel.get("from_step"), rel.get("to_step"),
-                         label=rel.get("relationship", ""))
-    else:
-        for i in range(len(steps) - 1):
-            net.add_edge(steps[i].step_number, steps[i+1].step_number)
+            from_step = rel.get("from_step")
+            to_step   = rel.get("to_step")
 
+            # 🔥 HARD FIX: skip invalid edges
+            if from_step not in valid_nodes or to_step not in valid_nodes:
+                print(f"⚠️ Skipping invalid edge: {from_step} -> {to_step}")
+                continue
+
+            net.add_edge(
+                from_step,
+                to_step,
+                label=rel.get("relationship", "")
+            )
+    else:
+        # fallback sequential flow
+        for i in range(len(steps) - 1):
+            net.add_edge(
+                steps[i].step_number,
+                steps[i+1].step_number
+            )
 
     net.barnes_hut()
     net.write_html(file_path)
-    return file_path
 
+    return file_path
 
 analysis_service = AnalysisService()
 

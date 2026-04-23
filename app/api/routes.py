@@ -5,14 +5,19 @@ from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from app.db.db_connection import get_mysql_connection
 from app.core.analysis_service import analysis_service
+from app.core.simulation_service import SimulationService
+from app.api.agent_routes import agent_bp
+import uuid
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+api_bp.register_blueprint(agent_bp)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"}
 MAX_FILES = 20
 MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 50))
 
+simulation_service = SimulationService()
 
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -95,6 +100,11 @@ def analyze():
     Accepts multipart/form-data with one or more files.
     Runs the full analysis pipeline and returns the result.
     """
+    session_id = request.form.get("session_id")
+
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
     if "files" not in request.files:
         return jsonify({"error": "No files provided"}), 400
 
@@ -123,7 +133,11 @@ def analyze():
         return jsonify({"error": "No valid files found"}), 400
 
     try:
-        result = analysis_service.analyze(file_data, user_input=user_input)
+        result = analysis_service.analyze(
+            file_data,
+            user_input=user_input,
+            session_id=session_id
+        )
         return jsonify(result.to_api()), 200
     except ValueError as e:
         logger.error(f"Analysis config error: {e}")
@@ -188,8 +202,8 @@ def get_react_flow(_key: str):
         # Pass the _key value to your service
         flow_data = analysis_service.get_react_flow_data(_key)
         
-        if not flow_data["nodes"]:
-            return jsonify({"error": "Process flow not found"}), 404
+        if not flow_data.get("lanes") or not flow_data.get("flow"):
+            return jsonify({"error": "No flow data"}), 404
             
         return jsonify(flow_data)
     except Exception as e:
@@ -236,4 +250,21 @@ def get_agent_architecture(suggestion_key: str):
         return jsonify({"error": "Could not fetch architecture"}), 500
 
 
+@api_bp.post("/simulate/<process_key>")
+def simulate(process_key):
+    try:
+        data = analysis_service.get_process(process_key)
+
+        if not data:
+            return jsonify({"error": "Process not found"}), 404
+
+        steps = data["steps"]
+        suggestions = data["suggestions"]
+
+        result = simulation_service.run_simulation(steps, suggestions)
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 

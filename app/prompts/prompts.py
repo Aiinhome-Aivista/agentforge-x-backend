@@ -62,6 +62,22 @@ IMPORTANT INSTRUCTIONS:
 - If the document is high-level, infer missing intermediate steps logically
 - Always return multiple steps even if input is short
 
+STRICT RULES:
+
+- Every step MUST include a "lane" (department)
+- Lane examples:
+  - Administrative Manager
+  - Warehouse
+  - Quality Sector
+  - Production
+  - Expedition
+
+- "actor" is specific person/system
+- "lane" is department (used for swimlane)
+
+- If decision exists:
+  step_type MUST be "decision"
+
 Return a JSON object with this exact structure:
 {{
   "process_title": "string - clear name for this process",
@@ -74,6 +90,8 @@ Return a JSON object with this exact structure:
       "title": "...",
       "description": "...",
       "actor": "...",
+      "lane": "Procurement Department",   
+      "role_type": "human",
       "micro_steps": [
         {{
           "micro_step_id": "1.1",
@@ -266,27 +284,57 @@ ERP Modules: {str(erp_modules)[:2000]}
 
 CRITICAL INSTRUCTIONS:
 
-- You MUST generate step_sequences connecting ALL steps
-- Total steps count = {len(steps)}
-- You MUST create exactly (total_steps - 1) step_sequences
+- You MUST generate logical relationships between steps
+- Steps can have multiple outgoing edges
+- Not all steps must connect linearly
 
-STRICT RULE:
-- Step 1 → Step 2
-- Step 2 → Step 3
-- Step 3 → Step 4
-- Continue this pattern until last step
+FLOW RULES:
+
+- Support:
+  - Sequential flow
+  - Decision branching (YES / NO / APPROVED / REJECTED)
+  - Loop backs (return to previous steps)
+  - Cross-lane transitions (different roles/departments)
+
+- If a step is a decision:
+  - It MUST have at least 2 outgoing edges
+  - Each edge MUST include a "condition"
+
+- You MAY create:
+  - More or fewer edges than (n-1)
+  - Multiple edges from one step
+
+- Ensure:
+  - No step is completely isolated
+  - Flow remains logically consistent
+
+EDGE FORMAT:
+
+"step_sequences": [
+  {{
+    "from_step": 3,
+    "to_step": 4,
+    "type": "normal"
+  }},
+  {{
+    "from_step": 3,
+    "to_step": 5,
+    "type": "conditional",
+    "condition": "YES"
+  }},
+  {{
+    "from_step": 3,
+    "to_step": 2,
+    "type": "loop",
+    "condition": "REJECTED"
+  }}
+]
+
 
 DO NOT:
 - Skip any step
 - Leave any step unconnected
 - Return empty step_sequences
-
-Even if relationships are unclear, ALWAYS assume linear execution order.
-
-VALIDATION REQUIREMENT:
-- If there are 10 steps, you MUST return 9 step_sequences
-- If not, your response is INVALID
-
 
 
 Return a JSON object with edge data for a graph database:
@@ -364,139 +412,116 @@ Rules:
 
 # ── PASS 5: REACT FLOW GRAPH LAYOUT ──────────────────────────────────────────
 def build_react_flow_prompt(process_title: str, steps: list, suggestions: list) -> str:
-        return f"""
-    You are a React Flow diagram architect. Your job is to generate a COMPLETE, FULLY CONNECTED 
-    node-edge graph for the process: "{process_title}"
+    return f"""
+You are a workflow visualization engine.
 
-    STEPS DATA:
-    {safe_json(steps)}
+Your task is to convert a business process into a STRUCTURED LANE-BASED FLOW JSON.
 
-    SUGGESTIONS DATA:
-    {safe_json(suggestions)}
+PROCESS:
+"{process_title}"
 
-    YOUR TASK:
-    Generate a fully connected React Flow diagram with:
-    1. One GROUP node per unique actor
-    2. One STEP node per step (placed inside its actor's group)
-    3. One AGENT node per suggestion (placed to the right of all groups)
-    4. SEQUENTIAL edges connecting every step in order (step 1 → step 2 → step 3 etc.)
-    5. AUTOMATES edges from each agent to its target step
-    6. CONTINUES edges from each agent to the next step after its target
+STEPS:
+{safe_json(steps)}
 
-    LAYOUT RULES:
-    - Groups are placed LEFT SIDE, stacked vertically, x=60, y increases by 300 per group
-    - Steps inside a group: x=20, y=60 + (slot_index * 100)
-    - Agent nodes are placed RIGHT SIDE: x=900, y increases by 220 per agent
-    - Every step MUST be inside a group (parentNode set)
-    - Every step MUST have at least one sequential edge
+SUGGESTIONS:
+{safe_json(suggestions)}
 
-    NODE ID RULES:
-    - Group nodes: "group-{{actor_name_lowercase_hyphenated}}"
-    - Step nodes: "step-{{step_number}}"
-    - Agent nodes: "agent-{{suggestion_index}}"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT STRUCTURE (STRICT)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    EDGE ID RULES:
-    - Sequential: "seq-{{from_step_number}}-{{to_step_number}}"
-    - Automates: "auto-{{agent_index}}-{{step_number}}"
-    - Continues: "cont-{{agent_index}}-{{next_step_number}}"
+Return ONLY valid JSON in this format:
 
-    STRICT REQUIREMENTS:
-    - ALL steps must be connected sequentially — NO isolated steps
-    - If a step has no suggestion, it still gets a sequential edge
-    - Return EXACTLY one edge per sequential pair (n-1 edges for n steps)
-    - Agent nodes must connect to at least one step
-
-    Return ONLY this valid JSON structure, nothing else:
-
-
-    Return ONLY a VALID JSON with dynamically generated nodes and edges.
-
-    DO NOT reuse example IDs or labels.
-    ALL values must be derived from STEPS DATA and SUGGESTIONS DATA.
-
+{{
+  "title": "string",
+  "lanes": [
     {{
+      "id": "lane-id",
+      "label": "Lane Name",
       "nodes": [
         {{
-          "id": "group-procurement-team",
-          "type": "agentGroupNode",
-          "position": {{"x": 60, "y": 60}},
-          "style": {{"width": 380, "height": 260, "zIndex": 0}},
-          "data": {{
-            "label": "Procurement Team",
-            "icon": "Database",
-            "accentColor": "#6366f1"
+          "id": "node-id",
+          "type": "start | process | decision",
+          "label": "Node Label",
+          "column": number,
+          "agentInfo": {{
+            "title": "Agent name",
+            "type": "Agent type",
+            "tasks": ["task1", "task2"],
+            "accentColor": "#optional"
           }}
-        }},
-        {{
-          "id": "step-1",
-          "type": "processNode",
-          "parentNode": "group-procurement-team",
-          "extent": "parent",
-          "position": {{"x": 20, "y": 60}},
-          "style": {{"width": 340, "zIndex": 2}},
-          "data": {{
-            "label": "Convert Requisition to PO",
-            "actor": "Procurement Team",
-            "stepNumber": 1,
-            "automationPotential": 85,
-            "stepType": "system",
-            "inputs": ["Approved requisition"],
-            "outputs": ["Purchase Order"],
-            "painPoints": ["Manual data entry"],
-            "duration": "2 hours",
-            "erpModule": "MM",
-            "accentColor": "#10b981"
-          }}
-        }},
-        {{
-          "id": "agent-0",
-          "type": "agentNode",
-          "position": {{"x": 900, "y": 60}},
-          "style": {{"width": 300, "zIndex": 2}},
-          "data": {{
-            "title": "Automate PO Conversion",
-            "description": "Automatically converts approved requisitions",
-            "tasks": ["Read approved requisition", "Generate PO", "Post to ERP"],
-            "agentType": "workflow_automation",
-            "accuracy": 92,
-            "roiImpact": "high",
-            "effortLevel": "medium",
-            "technologies": ["SAP BTP", "Python"],
-            "accentColor": "#8b5cf6"
-          }}
-        }}
-      ],
-      "edges": [
-        {{
-          "id": "seq-1-2",
-          "source": "step-1",
-          "target": "step-2",
-          "type": "smoothstep",
-          "animated": true,
-          "label": "next",
-          "style": {{"stroke": "#4b5563", "strokeWidth": 2, "zIndex": 10}}
-        }},
-        {{
-          "id": "auto-0-1",
-          "source": "agent-0",
-          "target": "step-1",
-          "type": "smoothstep",
-          "animated": true,
-          "label": "automates suggestion",
-          "style": {{"strokeDasharray": "5,5", "stroke": "#8b5cf6", "strokeWidth": 2, "zIndex": 10}}
-        }},
-        {{
-          "id": "cont-0-2",
-          "source": "agent-0",
-          "target": "step-2",
-          "type": "smoothstep",
-          "animated": true,
-          "label": "continues flow",
-          "style": {{"stroke": "#22c55e", "strokeWidth": 2, "zIndex": 10}}
         }}
       ]
     }}
-    """
+  ],
+  "flow": [
+    {{
+      "from": "node-id",
+      "to": "node-id",
+      "type": "inline | down | yes | no | diagonal_down",
+      "label": "text"
+    }}
+  ]
+}}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. GROUPING:
+- Group steps by "lane" → each lane becomes one entry
+- lane id = lowercase + hyphen (e.g., "quality-sector")
+
+2. START NODE:
+- ALWAYS include one start node in first lane:
+  {{
+    "id": "start",
+    "type": "start",
+    "label": "",
+    "column": 0
+  }}
+
+3. NODE RULES:
+- Each step → one node
+- type:
+  - "decision" if step_type == "decision"
+  - otherwise "process"
+
+4. COLUMN LOGIC:
+- Assign increasing column numbers (0,1,2...) per lane
+- Keep flow visually progressive
+
+5. AGENT INFO:
+- If suggestion exists for a step:
+  attach:
+    {{
+      "title": suggestion title,
+      "type": automation_type,
+      "tasks": derived from description,
+      "accentColor": "#optional"
+    }}
+- If no suggestion → DO NOT include agentInfo
+
+6. FLOW RULES:
+- Connect steps sequentially
+- If decision:
+  - MUST create YES / NO edges
+- Use types:
+  - inline → same lane forward
+  - down → different lane
+  - yes / no → decision branches
+
+7. IMPORTANT:
+- DO NOT include "color" field anywhere
+- DO NOT include extra fields
+- ALL nodes must be connected
+- IDs must be unique
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT:
+ONLY JSON. NO explanation.
+"""
+
 
 
 def build_inventory_react_flow_prompt(process_title: str, steps: list, suggestions: list) -> str:
@@ -1147,56 +1172,62 @@ CORE DESIGN PRINCIPLES:
 - Deployment = Kubernetes
 
 --------------------------------------------------
-MANDATORY ENTERPRISE COMPONENTS:
+DYNAMIC COMPONENT SELECTION LOGIC:
+
+The architecture MUST be generated based on CONTEXT — do NOT include unnecessary components.
 
 INPUT CHANNELS:
-- Email Input (PDF)
-- Chat Input
-- ERP System
+- If documents/files are present → include Email/Input + OCR ingestion
+- If chat/user interaction → include Chat Input
+- If ERP mentioned → include ERP Connector
 
 CONNECTORS:
-- Email Ingestion Service (Lambda / API)
-- Chat Connector (Webhook Service)
-- ERP API Connector
+- Add connectors ONLY for selected inputs
 
 INTERFACE:
-- Web / Mobile UI
-- Vendor Portal (Human-in-loop)
+- Add Web/Mobile UI ONLY if user interaction is needed
+- Add Human-in-the-loop ONLY if approval/exception exists
 
-CORE PLATFORM:
-- API Gateway (auth, routing)
-- Agentic Orchestrator (state machine service)
-- LLM Planner Service
+CORE PLATFORM (ALWAYS INCLUDE):
+- API Gateway
+- Agentic Orchestrator
 
-AGENTS (DYNAMIC):
-- Derived from process
-- Each agent = independent microservice
-- Minimum 2 agents
+OPTIONAL CORE:
+- Add LLM Planner ONLY if multi-step reasoning is required
 
-SHARED CONTEXT:
-- Vector DB (semantic search)
-- Memory Store (conversation/session)
-- Relational DB (transactions)
-- Integration Middleware (API orchestration)
-- Guardrails Service (security + validation)
+AGENTS:
+- Dynamically derive from process steps
+- Each major step = one agent
+- Validation → Validation Agent
+- Matching → Matching Agent
+- Extraction → OCR/Extraction Agent
 
-INFRASTRUCTURE LAYER (MANDATORY):
+DATA LAYER:
+- If semantic retrieval needed → Vector DB
+- If transactional data → Relational DB
+- If session/state → Redis
+- If simple → skip unnecessary DBs
 
-- Kubernetes Cluster
-  - Hosts ALL services
+INFRASTRUCTURE:
+- ALWAYS include Kubernetes
 
-- Redis Cluster
-  - Orchestration state
-  - Session cache
+- Add Redis ONLY if:
+  - stateful workflow OR
+  - caching needed
 
-- Kafka / Event Bus
-  - Async messaging between services
+- Add Kafka ONLY if:
+  - multiple agents OR
+  - async/event-driven flow
 
-- Object Storage (S3/Blob)
-  - Documents, artifacts
+STORAGE:
+- Add Object Storage ONLY if documents/artifacts involved
 
-- Observability Stack
-  - Logging + monitoring
+OUTPUT SYSTEMS:
+- Derived from process (ERP update, payment, documents, notifications)
+
+OPTIMIZATION:
+- Simple workflows → 8–10 nodes
+- Complex workflows → 12–18 nodes
 
 --------------------------------------------------
 DEPLOYMENT RULES:
@@ -1291,3 +1322,6 @@ FINAL EXPECTATION:
 - No abstract nodes
 - Must resemble AWS/Azure production architecture
 """
+
+
+

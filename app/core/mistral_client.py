@@ -258,11 +258,10 @@ class MistralClient:
 
     def generate_react_flow(self, process_title: str, steps: list, suggestions: list, workflow_type: str = "generic") -> dict:
         wf_keywords = ["inventory", "stock", "sales order", "purchase order", "procurement"]
-        if workflow_type == "inventory" or any(k in process_title.lower() for k in wf_keywords):
-            prompt = build_inventory_react_flow_prompt(process_title, steps, suggestions)
-        else:
-            prompt = build_react_flow_prompt(process_title, steps, suggestions)
-        
+        # ALWAYS use lane-based prompt
+        prompt = build_react_flow_prompt(process_title, steps, suggestions)
+
+
         response = self.client.chat.complete(
             model=self.model,
             messages=[
