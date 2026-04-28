@@ -139,12 +139,16 @@ class AnalysisService:
         db  = get_db()
         llm = get_mistral_client()
 
-
+   
         # Step 1: Parse all files
         combined_text_parts = []
         combined_metadata   = {}
-        primary_file        = files[0][1]
-        primary_source_type = detect_source_type(primary_file)
+        if files:
+            primary_file        = files[0][1]
+            primary_source_type = detect_source_type(primary_file)
+        else:
+            primary_file = "text_input"
+            primary_source_type = "text"
 
 
         for file_bytes, filename in files:
@@ -313,10 +317,12 @@ class AnalysisService:
             except: return index + 1
 
 
+        # ✅ FIX: Force sequential numbering
+        raw_steps = sorted(raw_steps, key=lambda x: int(x.get("step_number", 0)))
+
         for idx, raw in enumerate(raw_steps):
-            step_num = clean_step_number(raw.get("step_number"), idx)
-            if step_num in step_key_map:
-                step_num = max(step_key_map.keys()) + 1
+            step_num = idx + 1
+            raw["step_number"] = step_num   # 🔥 MAIN FIX (ignore LLM number completely)
 
 
             step = ProcessStep(

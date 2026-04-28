@@ -94,43 +94,114 @@ def login():
 
 
 
+# @api_bp.post("/analyze")
+# def analyze():
+#     """
+#     Accepts multipart/form-data with one or more files.
+#     Runs the full analysis pipeline and returns the result.
+#     """
+#     session_id = request.form.get("session_id")
+
+#     if not session_id:
+#         session_id = str(uuid.uuid4())
+
+#     user_input = request.form.get("user_input", "").strip()
+
+#     uploaded = request.files.getlist("files") if "files" in request.files else []
+
+#     # 🔥 NEW: allow text-only input
+#     if not uploaded and not user_input:
+#         return jsonify({"error": "No input provided"}), 400
+
+#     # uploaded = request.files.getlist("files")
+#     file_data = []
+
+#     for f in uploaded:
+#         if not f.filename:
+#             continue
+#         if not allowed_file(f.filename):
+#             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
+
+#         file_bytes = f.read()
+#         file_data.append((file_bytes, secure_filename(f.filename)))
+#     if len(uploaded) > MAX_FILES:
+#         return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
+#     user_input = request.form.get("user_input", "").strip()
+
+#     file_data = []
+#     for f in uploaded:
+#         if not f.filename:
+#             continue
+#         if not allowed_file(f.filename):
+#             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
+
+#         file_bytes = f.read()
+#         size_mb = len(file_bytes) / (1024 * 1024)
+#         if size_mb > MAX_SIZE_MB:
+#             return jsonify({"error": f"File too large: {f.filename} ({size_mb:.1f}MB)"}), 400
+
+#         file_data.append((file_bytes, secure_filename(f.filename)))
+
+#     if not file_data:
+#         return jsonify({"error": "No valid files found"}), 400
+
+#     try:
+#         result = analysis_service.analyze(
+#             file_data,
+#             user_input=user_input,
+#             session_id=session_id
+#         )
+#         return jsonify(result.to_api()), 200
+#     except ValueError as e:
+#         logger.error(f"Analysis config error: {e}")
+#         return jsonify({"error": str(e)}), 400
+#     except Exception as e:
+#         logger.error(f"Analysis failed: {e}", exc_info=True)
+#         return jsonify({"error": "Analysis failed. Please try again."}), 500
+
 @api_bp.post("/analyze")
 def analyze():
-    """
-    Accepts multipart/form-data with one or more files.
-    Runs the full analysis pipeline and returns the result.
-    """
-    session_id = request.form.get("session_id")
+    print("🔥 ANALYZE API HIT")
+    print("FILES:", request.files)
+    print("FORM:", request.form)
 
+    session_id = request.form.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
 
-    if "files" not in request.files:
-        return jsonify({"error": "No files provided"}), 400
-
-    uploaded = request.files.getlist("files")
-    if not uploaded:
-        return jsonify({"error": "Empty file list"}), 400
-    if len(uploaded) > MAX_FILES:
-        return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
     user_input = request.form.get("user_input", "").strip()
 
+    uploaded = request.files.getlist("files") if "files" in request.files else []
+
+    # ✅ Allow text-only OR file-only
+    if not uploaded and not user_input:
+        return jsonify({"error": "No input provided"}), 400
+
+    if len(uploaded) > MAX_FILES:
+        return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
+
     file_data = []
+
     for f in uploaded:
         if not f.filename:
             continue
+
         if not allowed_file(f.filename):
             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
 
         file_bytes = f.read()
         size_mb = len(file_bytes) / (1024 * 1024)
+
         if size_mb > MAX_SIZE_MB:
-            return jsonify({"error": f"File too large: {f.filename} ({size_mb:.1f}MB)"}), 400
+            return jsonify({
+                "error": f"File too large: {f.filename} ({size_mb:.1f}MB)"
+            }), 400
 
         file_data.append((file_bytes, secure_filename(f.filename)))
 
-    if not file_data:
-        return jsonify({"error": "No valid files found"}), 400
+    # ❗ IMPORTANT: Only block if BOTH empty
+    if not file_data and not user_input:
+        return jsonify({"error": "No valid input found"}), 400
 
     try:
         result = analysis_service.analyze(
@@ -139,13 +210,14 @@ def analyze():
             session_id=session_id
         )
         return jsonify(result.to_api()), 200
+
     except ValueError as e:
         logger.error(f"Analysis config error: {e}")
         return jsonify({"error": str(e)}), 400
+
     except Exception as e:
         logger.error(f"Analysis failed: {e}", exc_info=True)
         return jsonify({"error": "Analysis failed. Please try again."}), 500
-
 
 # ── Process CRUD ──────────────────────────────────────────────────────────────
 
