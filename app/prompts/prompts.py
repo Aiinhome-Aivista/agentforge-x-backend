@@ -276,79 +276,388 @@ Return ONLY valid JSON:
 
 # ── PASS 4: LOGICAL RELATIONSHIPS (ArangoDB graph data) ───────────────────────
 
+# def build_relationships_prompt(process_title: str, steps: list, erp_modules: list) -> str:
+#     return f"""Identify logical relationships between process components for "{process_title}".
+
+# Steps: {str(steps)[:4000]}
+# ERP Modules: {str(erp_modules)[:2000]}
+
+# CRITICAL INSTRUCTIONS:
+
+# - You MUST generate logical relationships between steps
+# - Steps can have multiple outgoing edges
+# - Not all steps must connect linearly
+
+# FLOW RULES:
+
+# - Support:
+#   - Sequential flow
+#   - Decision branching (YES / NO / APPROVED / REJECTED)
+#   - Loop backs (return to previous steps)
+#   - Cross-lane transitions (different roles/departments)
+
+# - If a step is a decision:
+#   - It MUST have at least 2 outgoing edges
+#   - Each edge MUST include a "condition"
+
+# - You MAY create:
+#   - More or fewer edges than (n-1)
+#   - Multiple edges from one step
+
+# - Ensure:
+#   - No step is completely isolated
+#   - Flow remains logically consistent
+
+# EDGE FORMAT:
+
+# "step_sequences": [
+#   {{
+#     "from_step": 3,
+#     "to_step": 4,
+#     "type": "normal"
+#   }},
+#   {{
+#     "from_step": 3,
+#     "to_step": 5,
+#     "type": "conditional",
+#     "condition": "YES"
+#   }},
+#   {{
+#     "from_step": 3,
+#     "to_step": 2,
+#     "type": "loop",
+#     "condition": "REJECTED"
+#   }}
+# ]
+
+
+# DO NOT:
+# - Skip any step
+# - Leave any step unconnected
+# - Return empty step_sequences
+
+
+# Return a JSON object with edge data for a graph database:
+# {{
+#   "step_sequences": [
+#     {{"from_step": 2, "to_step": 3, "type": "normal | conditional | loop", "condition": "optional condition"}}
+#   ],
+#   "module_relationships": [
+#     {{"from_module": "module name", "to_module": "module name", "relationship": "string"}}
+#   ],
+#   "cross_process_dependencies": [
+#     {{"description": "string - any external process this connects to"}}
+#   ]
+# }}"""
+
+# ── PASS 4: LOGICAL RELATIONSHIPS (ArangoDB graph data) ───────────────────────
+
 def build_relationships_prompt(process_title: str, steps: list, erp_modules: list) -> str:
-    return f"""Identify logical relationships between process components for "{process_title}".
+    return f"""
+You are an enterprise workflow intelligence engine.
 
-Steps: {str(steps)[:4000]}
-ERP Modules: {str(erp_modules)[:2000]}
+Your task is to generate a CONTEXT GRAPH for the business process:
+"{process_title}"
 
-CRITICAL INSTRUCTIONS:
+The graph must model:
+- Decisions
+- Actors
+- Goals
+- Constraints
+- Metrics
+- Assumptions
+- Risks
+- Causal Factors
+- Interventions
+- Validation Paths
+- Step Relationships
+- ERP Module Dependencies
 
-- You MUST generate logical relationships between steps
+==================================================
+PROCESS DATA
+==================================================
+
+STEPS:
+{str(steps)[:5000]}
+
+ERP MODULES:
+{str(erp_modules)[:3000]}
+
+==================================================
+CONTEXT GRAPH RULES
+==================================================
+
+The graph MUST follow this structure:
+
+1. Define Decision
+   - What decision is being made?
+   - Every major workflow should map to at least one decision node
+
+2. Identify Actor
+   - Who owns the decision?
+   - Actors may include:
+     - Employee
+     - Manager
+     - Finance Team
+     - Procurement Team
+     - System
+     - ERP Module
+
+3. Set Goal
+   - What is the expected outcome?
+   - Goals should describe success states
+
+4. Attach Metrics
+   - Define measurable KPIs
+   - Example:
+     - approval_time
+     - cost_reduction
+     - inventory_accuracy
+     - SLA_compliance
+
+5. Surface Constraints
+   - Business rules
+   - Compliance requirements
+   - Budget limitations
+   - Authorization limitations
+
+6. Expose Assumptions
+   - What assumptions exist?
+   - Example:
+     - data_is_correct
+     - approver_is_available
+     - vendor_exists
+
+7. Map Risks
+   - What can fail?
+   - Include operational risks
+   - Include compliance risks
+   - Include dependency risks
+
+8. Add Causal Factors
+   - What influences outcomes?
+   - Include:
+     - delays
+     - missing_data
+     - human_error
+     - ERP_sync_failure
+
+9. Define Interventions
+   - What actions mitigate failure?
+   - Example:
+     - escalation
+     - retry
+     - automated_validation
+     - manager_override
+
+10. Validate Scenario
+   - Can the workflow trace:
+     - failure paths
+     - rollback paths
+     - recovery paths
+     - audit trails
+
+==================================================
+FLOW & RELATIONSHIP RULES
+==================================================
+
 - Steps can have multiple outgoing edges
-- Not all steps must connect linearly
-
-FLOW RULES:
-
 - Support:
   - Sequential flow
-  - Decision branching (YES / NO / APPROVED / REJECTED)
-  - Loop backs (return to previous steps)
-  - Cross-lane transitions (different roles/departments)
+  - Conditional branching
+  - Approval/Rejection flow
+  - Loop backs
+  - Parallel flow
+  - Cross-department flow
 
-- If a step is a decision:
-  - It MUST have at least 2 outgoing edges
-  - Each edge MUST include a "condition"
+- Decision steps MUST contain:
+  - at least 2 outgoing edges
+  - condition labels
 
-- You MAY create:
-  - More or fewer edges than (n-1)
-  - Multiple edges from one step
+- No node should remain isolated
 
-- Ensure:
-  - No step is completely isolated
-  - Flow remains logically consistent
+- Relationships must remain logically valid
 
-EDGE FORMAT:
+==================================================
+GRAPH OUTPUT FORMAT
+==================================================
 
-"step_sequences": [
-  {{
-    "from_step": 3,
-    "to_step": 4,
-    "type": "normal"
-  }},
-  {{
-    "from_step": 3,
-    "to_step": 5,
-    "type": "conditional",
-    "condition": "YES"
-  }},
-  {{
-    "from_step": 3,
-    "to_step": 2,
-    "type": "loop",
-    "condition": "REJECTED"
-  }}
-]
+Return ONLY valid JSON.
 
+{{
+  "process_title": "{process_title}",
+
+  "decision_nodes": [
+    {{
+      "id": "DEC-1",
+      "decision": "string",
+      "description": "string"
+    }}
+  ],
+
+  "actors": [
+    {{
+      "id": "ACT-1",
+      "name": "string",
+      "role": "string"
+    }}
+  ],
+
+  "goals": [
+    {{
+      "id": "GOAL-1",
+      "goal": "string",
+      "success_criteria": "string"
+    }}
+  ],
+
+  "metrics": [
+    {{
+      "id": "MET-1",
+      "metric": "string",
+      "target": "string"
+    }}
+  ],
+
+  "constraints": [
+    {{
+      "id": "CON-1",
+      "constraint": "string",
+      "type": "business | technical | compliance"
+    }}
+  ],
+
+  "assumptions": [
+    {{
+      "id": "ASM-1",
+      "assumption": "string"
+    }}
+  ],
+
+  "risks": [
+    {{
+      "id": "RSK-1",
+      "risk": "string",
+      "severity": "low | medium | high"
+    }}
+  ],
+
+  "causal_factors": [
+    {{
+      "id": "CAUSE-1",
+      "factor": "string",
+      "impact": "string"
+    }}
+  ],
+
+  "interventions": [
+    {{
+      "id": "INT-1",
+      "action": "string",
+      "trigger": "string"
+    }}
+  ],
+
+  "validation_scenarios": [
+    {{
+      "id": "VAL-1",
+      "scenario": "string",
+      "expected_result": "string"
+    }}
+  ],
+
+  "step_sequences": [
+    {{
+      "from_step": 1,
+      "to_step": 2,
+      "type": "normal"
+    }},
+    {{
+      "from_step": 2,
+      "to_step": 4,
+      "type": "conditional",
+      "condition": "APPROVED"
+    }},
+    {{
+      "from_step": 2,
+      "to_step": 1,
+      "type": "loop",
+      "condition": "REJECTED"
+    }}
+  ],
+
+  "decision_relationships": [
+    {{
+      "from": "Actor",
+      "to": "Decision",
+      "relationship": "owns"
+    }},
+    {{
+      "from": "Decision",
+      "to": "Goal",
+      "relationship": "drives"
+    }},
+    {{
+      "from": "Constraint",
+      "to": "Decision",
+      "relationship": "limits"
+    }},
+    {{
+      "from": "Metric",
+      "to": "Goal",
+      "relationship": "measures"
+    }},
+    {{
+      "from": "Assumption",
+      "to": "Decision",
+      "relationship": "influences"
+    }},
+    {{
+      "from": "Risk",
+      "to": "Goal",
+      "relationship": "threatens"
+    }},
+    {{
+      "from": "CausalFactor",
+      "to": "Risk",
+      "relationship": "causes"
+    }},
+    {{
+      "from": "Intervention",
+      "to": "Risk",
+      "relationship": "mitigates"
+    }}
+  ],
+
+  "module_relationships": [
+    {{
+      "from_module": "string",
+      "to_module": "string",
+      "relationship": "depends_on | syncs_with | validates"
+    }}
+  ],
+
+  "cross_process_dependencies": [
+    {{
+      "description": "string"
+    }}
+  ]
+}}
+
+==================================================
+IMPORTANT
+==================================================
 
 DO NOT:
-- Skip any step
-- Leave any step unconnected
-- Return empty step_sequences
+- Return explanations
+- Return markdown
+- Return partial JSON
+- Leave nodes disconnected
+- Create invalid relationships
 
+The output MUST be graph-database ready.
+"""
 
-Return a JSON object with edge data for a graph database:
-{{
-  "step_sequences": [
-    {{"from_step": 2, "to_step": 3, "type": "normal | conditional | loop", "condition": "optional condition"}}
-  ],
-  "module_relationships": [
-    {{"from_module": "module name", "to_module": "module name", "relationship": "string"}}
-  ],
-  "cross_process_dependencies": [
-    {{"description": "string - any external process this connects to"}}
-  ]
-}}"""
 
 def build_toc_enrichment_prompt(
     process_title: str,
@@ -430,7 +739,7 @@ SUGGESTIONS:
 OUTPUT STRUCTURE (STRICT)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Return ONLY valid JSON in this format:
+Return ONLY valid JSON in this EXACT format. YOU MUST NOT add any other root keys like 'graph' or 'data'. YOU MUST include 'lanes' and 'flow' at the root level.
 
 {{
   "title": "string",

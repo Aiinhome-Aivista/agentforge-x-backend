@@ -1,6 +1,7 @@
 import logging
 import uuid
 from typing import List, Tuple, Dict, Any
+# pyrefly: ignore [missing-import]
 from pyvis.network import Network
 import os
 from app.parsers.file_parser import parse_file, detect_source_type
@@ -139,30 +140,45 @@ class AnalysisService:
         db  = get_db()
         llm = get_mistral_client()
 
-   
-        # Step 1: Parse all files
+
+        # Step 1: Parse all inputs
         combined_text_parts = []
         combined_metadata   = {}
+
+        # Detect primary source
         if files:
-            primary_file        = files[0][1]
+            primary_file = files[0][1]
             primary_source_type = detect_source_type(primary_file)
         else:
-            primary_file = "text_input"
+            primary_file = "web_input.txt"
             primary_source_type = "text"
 
+        # Parse uploaded files
+        if files:
+            for file_bytes, filename in files:
+                text, meta = parse_file(file_bytes, filename)
 
-        for file_bytes, filename in files:
-            text, meta = parse_file(file_bytes, filename)
-            combined_text_parts.append(f"=== File: {filename} ===\n{text}")
-            combined_metadata[filename] = meta
-            logger.info(f"Parsed {filename}: {len(text)} chars")
+                combined_text_parts.append(f"=== File: {filename} ===\n{text}")
+                combined_metadata[filename] = meta
 
+                logger.info(f"Parsed {filename}: {len(text)} chars")
 
+        # Add user input
+        if user_input:
+            combined_text_parts.append(f"=== USER INPUT ===\n{user_input}")
+
+        # 🔥 CRITICAL: Must have at least one input
+        if not combined_text_parts:
+            raise ValueError("No input to analyze")
+
+        # Final combined text
         combined_text = "\n\n".join(combined_text_parts)
+
+        # Optional instruction wrapper
         if user_input:
             combined_text = (
                 f"=== USER INSTRUCTIONS ===\n{user_input}\n\n"
-                f"=== UPLOADED FILE DATA ===\n{combined_text}"
+                f"=== CONTEXT DATA ===\n{combined_text}"
             )
 
 
@@ -317,12 +333,10 @@ class AnalysisService:
             except: return index + 1
 
 
-        # ✅ FIX: Force sequential numbering
-        raw_steps = sorted(raw_steps, key=lambda x: int(x.get("step_number", 0)))
-
         for idx, raw in enumerate(raw_steps):
-            step_num = idx + 1
-            raw["step_number"] = step_num   # 🔥 MAIN FIX (ignore LLM number completely)
+            step_num = clean_step_number(raw.get("step_number"), idx)
+            if step_num in step_key_map:
+                step_num = max(step_key_map.keys()) + 1
 
 
             step = ProcessStep(
@@ -716,10 +730,15 @@ class AnalysisService:
         try:
             result = llm.generate_react_flow(process_title, steps, suggestions_data)
 
-
+            # --- ADD FALLBACK UNWRAPPING ---
+            if "lanes" not in result and "flow" not in result:
+                for key, value in result.items():
+                    if isinstance(value, dict) and "lanes" in value:
+                        result = value
+                        break
 
             if not result.get("lanes") or not result.get("flow"):
-                raise ValueError("LLM returned invalid lane-based graph")
+                raise ValueError(f"LLM returned invalid lane-based graph: {list(result.keys())}")
 
             # count nodes inside lanes
             node_count = sum(len(l.get("nodes", [])) for l in result.get("lanes", []))
@@ -729,9 +748,7 @@ class AnalysisService:
 
             logger.info(f"Lane graph: {len(result['lanes'])} lanes, {len(result['flow'])} flows")
 
-
             return result
-
 
         except Exception as e:
             logger.error(f"LLM graph failed: {e} — using sequential fallback")

@@ -1,0 +1,75 @@
+"""
+PATCH INSTRUCTIONS — app/core/analysis_service.py
+─────────────────────────────────────────────────────────────────────────────
+This patch wires the new `workflow_postprocess.ensure_start_end_nodes`
+helper into the existing `get_react_flow_data` method so every workflow
+graph returned by `/api/processes/<id>/flow` is guaranteed to have a
+Start node and an End node, matching spec section 4.
+
+The companion file `workflow_postprocess.py` (drop in alongside this one
+at `app/core/workflow_postprocess.py`) does the heavy lifting; the
+analysis_service only needs TWO surgical edits.
+
+═════════════════════════════════════════════════════════════════════════════
+EDIT 1 — Add the import near the top of analysis_service.py
+═════════════════════════════════════════════════════════════════════════════
+
+  Find (around line 16, near the existing imports):
+
+      from app.prompts.prompts import build_architecture_prompt, build_react_flow_prompt
+
+  ADD A NEW LINE directly below it:
+
+      from app.core.workflow_postprocess import ensure_start_end_nodes   # ⬅️ NEW
+
+
+═════════════════════════════════════════════════════════════════════════════
+EDIT 2 — Wrap every return in `get_react_flow_data` and
+         `_build_sequential_fallback`.
+═════════════════════════════════════════════════════════════════════════════
+
+Open `get_react_flow_data` (currently around line 680).
+
+  1. Inventory-workflow branch:
+
+         if wf_type == "inventory":
+             logger.info("Using LLM lane-based workflow builder (inventory override)")
+             result = llm.generate_react_flow(process_title, steps, suggestions_data)
+  -          return result
+  +          return ensure_start_end_nodes(result)     # ⬅️ CHANGED
+
+  2. Generic branch — success path:
+
+             logger.info(f"Lane graph: {len(result['lanes'])} lanes, {len(result['flow'])} flows")
+  -          return result
+  +          return ensure_start_end_nodes(result)     # ⬅️ CHANGED
+
+  3. Generic branch — fallback path:
+
+         except Exception as e:
+             logger.error(f"LLM graph failed: {e} — using sequential fallback")
+  -          return self._build_sequential_fallback(steps, suggestions_data)
+  +          return ensure_start_end_nodes(
+  +              self._build_sequential_fallback(steps, suggestions_data)
+  +          )                                           # ⬅️ CHANGED
+
+
+Open `_build_sequential_fallback` (currently around line 1124).
+
+  At the very end of the method:
+
+  -      return {"nodes": nodes, "edges": edges}
+  +      return ensure_start_end_nodes({"nodes": nodes, "edges": edges})   # ⬅️ CHANGED
+
+
+═════════════════════════════════════════════════════════════════════════════
+That's the entire patch.
+
+After applying:
+  • The lane-based path always emits a "lane-start" lane + a "lane-end"
+    lane wired into the flow array, so PDF / DOCX / PPTX exporters render
+    Start and End the same way the React UI does.
+  • The sequential fallback emits a green Start input-node before the
+    earliest step and an End output-node after the latest step.
+═════════════════════════════════════════════════════════════════════════════
+"""

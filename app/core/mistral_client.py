@@ -8,7 +8,9 @@ import json
 import logging
 import re
 from typing import Any, Dict, List
+# pyrefly: ignore [missing-import]
 from mistralai import Mistral
+# pyrefly: ignore [missing-import]
 from json_repair import repair_json
 
 from app.prompts.prompts import (
@@ -30,13 +32,26 @@ MAX_RETRIES = 2
 
 class MistralClient:
     def __init__(self):
-        api_key = os.getenv("MISTRAL_API_KEY")
-        if not api_key:
-            raise ValueError("MISTRAL_API_KEY environment variable not set")
-        self.client = Mistral(api_key=api_key)
-        self.model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
+        self.mode = (os.getenv("MISTRAL_MODE") or "").lower()
+        if self.mode == "local":
+            self.model = os.getenv("MISTRAL_LOCAL_MODEL")
+            local_url = os.getenv("MISTRAL_LOCAL_URL")
+            self.client = Mistral(api_key="local", server_url=local_url)
+        else:
+            api_key = os.getenv("MISTRAL_API_KEY")
+            if not api_key:
+                raise ValueError("MISTRAL_API_KEY environment variable not set")
+            self.client = Mistral(api_key=api_key)
+            self.model = os.getenv("MODEL_NAME") or os.getenv("MISTRAL_MODEL")
 
-    def _chat(self, system: str, user: str, temperature: float = 0.2) -> str:
+        temp_str = os.getenv("LLM_TEMPERATURE")
+        self.default_temp = float(temp_str) if temp_str else 0.2
+
+        tokens_str = os.getenv("LLM_MAX_TOKENS")
+        self.default_max_tokens = int(tokens_str) if tokens_str else 4096
+
+    def _chat(self, system: str, user: str, temperature: float = None) -> str:
+        temp = temperature if temperature is not None else self.default_temp
         for attempt in range(MAX_RETRIES + 1):
             try:
                 response = self.client.chat.complete(
@@ -45,8 +60,8 @@ class MistralClient:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    temperature=temperature,
-                    max_tokens=4096,
+                    temperature=temp,
+                    max_tokens=self.default_max_tokens,
                 )
                 return response.choices[0].message.content
             except Exception as e:
@@ -131,7 +146,7 @@ class MistralClient:
         logger.error("❌ JSON PARSE FAILED")
         logger.error(raw[:2000])
 
-        return []
+        return {}
 
 
 
@@ -268,8 +283,9 @@ class MistralClient:
                 {"role": "system", "content": SYSTEM_AUTOMATION_EXPERT},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=6000,   # IMPORTANT: must be high for large processes
-            temperature=0.1    # low temp = deterministic layout
+            response_format={"type": "json_object"},
+            max_tokens=self.default_max_tokens,
+            temperature=self.default_temp
         )
         
         raw = response.choices[0].message.content

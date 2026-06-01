@@ -1,3 +1,17 @@
+"""
+app/api/routes.py
+─────────────────────────────────────────────────────────────────────────────
+UPDATED (drop-in replacement)
+
+Changes vs previous version:
+  • Registers `chatbot_bp`  (/api/chatbot/*)
+  • Registers `code_gen_bp` (/api/suggestions/<id>/download-code)
+  • The `/analyze` endpoint now ALSO runs the new CSV / document
+    source-target detection over the uploaded files and attaches the result
+    to the response so the front-end can persist it alongside the analysis.
+  • `/chat` route is preserved (legacy) but new clients should use
+    /api/chatbot/ask which is scoped + intent-aware.
+"""
 import os
 import logging
 from app.core.rag_service import rag_query
@@ -7,11 +21,41 @@ from app.db.db_connection import get_mysql_connection
 from app.core.analysis_service import analysis_service
 from app.core.simulation_service import SimulationService
 from app.api.agent_routes import agent_bp
+from app.api.auth_routes import auth_bp
+from app.api.subscription_routes import billing_bp
+from app.api.workspace_routes import workspace_bp
+from app.api.dummy_payment_routes import dummy_billing_bp
+from app.api.web_search_routes import search_bp
+from app.api.captcha_routes import captcha_bp, register_auth_gate
+from app.api.blog_routes import blog_bp
+from app.api.admin_routes import admin_bp
+from app.api.technical_design_routes import technical_design_bp
+from app.api.chatbot_routes import chatbot_bp                # ⬅️ NEW
+from app.api.code_generation_routes import code_gen_bp       # ⬅️ NEW
+from app.api.blueprint_export_routes import blueprint_export_bp  # ⬅️ NEW (blueprint export API)
+
+from app.services.source_detector_service import (             # ⬅️ NEW
+    build_source_target_report,
+)
+
 import uuid
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 api_bp.register_blueprint(agent_bp)
+api_bp.register_blueprint(auth_bp)
+api_bp.register_blueprint(billing_bp)
+api_bp.register_blueprint(workspace_bp)
+api_bp.register_blueprint(dummy_billing_bp)
+api_bp.register_blueprint(search_bp)
+api_bp.register_blueprint(captcha_bp)
+api_bp.register_blueprint(blog_bp)
+api_bp.register_blueprint(admin_bp)
+api_bp.register_blueprint(technical_design_bp)
+api_bp.register_blueprint(chatbot_bp)        # ⬅️ NEW
+api_bp.register_blueprint(code_gen_bp)       # ⬅️ NEW
+api_bp.register_blueprint(blueprint_export_bp)  # ⬅️ NEW (GET /processes/<key>/blueprint-export)
+register_auth_gate(api_bp)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"}
 MAX_FILES = 20
@@ -19,12 +63,12 @@ MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 50))
 
 simulation_service = SimulationService()
 
+
 def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
-
 @api_bp.get("/health")
 def health():
     return jsonify({"status": "ok", "service": "process-agentifier"})
@@ -34,13 +78,10 @@ def health():
 def test_db():
     conn = get_mysql_connection()
     cursor = conn.cursor()
-
     cursor.execute("SELECT 1")
     result = cursor.fetchone()
-
     cursor.close()
     conn.close()
-
     return {
         "status": "success",
         "statuscode": 200,
@@ -49,8 +90,8 @@ def test_db():
     }
 
 
-# ── Upload & Analyze ──────────────────────────────────────────────────────────
-@api_bp.route("/login",methods=['POST'])
+# ── Login (legacy) ────────────────────────────────────────────────────────────
+@api_bp.route("/login", methods=['POST'])
 def login():
     data = request.get_json()
     email = data["email"]
@@ -58,148 +99,48 @@ def login():
 
     conn = get_mysql_connection()
     cursor = conn.cursor(dictionary=True)
-
-    # Email check
     sql = "SELECT * FROM users where email = %s"
-    cursor.execute(sql,(email,))
+    cursor.execute(sql, (email,))
     user = cursor.fetchone()
     if not user:
-        return jsonify({
-            "status": False,
-            "statuscode": 404,
-            "message": "Email not found"
-        })
-
-    # Password check
+        return jsonify({"status": False, "statuscode": 404, "message": "Email not found"})
     if user["password"] != password:
-        return jsonify({
-            "status": False,
-            "statuscode": 401,
-            "message": "Incorrect password"
-        })    
-
-
+        return jsonify({"status": False, "statuscode": 401, "message": "Incorrect password"})
     cursor.close()
     conn.close()
-
     return jsonify({
-        "status":True,
-        "statuscode":200,
-        "message":"Login Successfully!!",
-        "data":{
-            "id": user["id"],
-            "name": user["name"]
-        }
+        "status": True, "statuscode": 200, "message": "Login Successfully!!",
+        "data": {"id": user["id"], "name": user["name"]},
     })
 
 
-
-# @api_bp.post("/analyze")
-# def analyze():
-#     """
-#     Accepts multipart/form-data with one or more files.
-#     Runs the full analysis pipeline and returns the result.
-#     """
-#     session_id = request.form.get("session_id")
-
-#     if not session_id:
-#         session_id = str(uuid.uuid4())
-
-#     user_input = request.form.get("user_input", "").strip()
-
-#     uploaded = request.files.getlist("files") if "files" in request.files else []
-
-#     # 🔥 NEW: allow text-only input
-#     if not uploaded and not user_input:
-#         return jsonify({"error": "No input provided"}), 400
-
-#     # uploaded = request.files.getlist("files")
-#     file_data = []
-
-#     for f in uploaded:
-#         if not f.filename:
-#             continue
-#         if not allowed_file(f.filename):
-#             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
-
-#         file_bytes = f.read()
-#         file_data.append((file_bytes, secure_filename(f.filename)))
-#     if len(uploaded) > MAX_FILES:
-#         return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
-#     user_input = request.form.get("user_input", "").strip()
-
-#     file_data = []
-#     for f in uploaded:
-#         if not f.filename:
-#             continue
-#         if not allowed_file(f.filename):
-#             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
-
-#         file_bytes = f.read()
-#         size_mb = len(file_bytes) / (1024 * 1024)
-#         if size_mb > MAX_SIZE_MB:
-#             return jsonify({"error": f"File too large: {f.filename} ({size_mb:.1f}MB)"}), 400
-
-#         file_data.append((file_bytes, secure_filename(f.filename)))
-
-#     if not file_data:
-#         return jsonify({"error": "No valid files found"}), 400
-
-#     try:
-#         result = analysis_service.analyze(
-#             file_data,
-#             user_input=user_input,
-#             session_id=session_id
-#         )
-#         return jsonify(result.to_api()), 200
-#     except ValueError as e:
-#         logger.error(f"Analysis config error: {e}")
-#         return jsonify({"error": str(e)}), 400
-#     except Exception as e:
-#         logger.error(f"Analysis failed: {e}", exc_info=True)
-#         return jsonify({"error": "Analysis failed. Please try again."}), 500
-
+# ── Upload & Analyze ──────────────────────────────────────────────────────────
 @api_bp.post("/analyze")
 def analyze():
-    print("🔥 ANALYZE API HIT")
-    print("FILES:", request.files)
-    print("FORM:", request.form)
-
     session_id = request.form.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
 
     user_input = request.form.get("user_input", "").strip()
-
     uploaded = request.files.getlist("files") if "files" in request.files else []
 
-    # ✅ Allow text-only OR file-only
     if not uploaded and not user_input:
         return jsonify({"error": "No input provided"}), 400
-
-    if len(uploaded) > MAX_FILES:
+    if uploaded and len(uploaded) > MAX_FILES:
         return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
 
     file_data = []
-
     for f in uploaded:
-        if not f.filename:
+        if not f or not f.filename:
             continue
-
         if not allowed_file(f.filename):
             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
-
         file_bytes = f.read()
         size_mb = len(file_bytes) / (1024 * 1024)
-
         if size_mb > MAX_SIZE_MB:
-            return jsonify({
-                "error": f"File too large: {f.filename} ({size_mb:.1f}MB)"
-            }), 400
-
+            return jsonify({"error": f"File too large: {f.filename} ({size_mb:.1f}MB)"}), 400
         file_data.append((file_bytes, secure_filename(f.filename)))
 
-    # ❗ IMPORTANT: Only block if BOTH empty
     if not file_data and not user_input:
         return jsonify({"error": "No valid input found"}), 400
 
@@ -207,20 +148,61 @@ def analyze():
         result = analysis_service.analyze(
             file_data,
             user_input=user_input,
-            session_id=session_id
+            session_id=session_id,
         )
-        return jsonify(result.to_api()), 200
+
+        # ── NEW: build source/target detection report from uploaded files ──
+        combined_text = user_input or ""
+        try:
+            from app.parsers.file_parser import parse_file
+            for fb, fname in file_data:
+                if fname.lower().endswith((".csv",)):
+                    continue  # CSV handled inside detector
+                try:
+                    text, _meta = parse_file(fb, fname)
+                    combined_text += "\n\n" + (text or "")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            source_target_report = build_source_target_report(file_data, combined_text)
+        except Exception as e:
+            logger.warning(f"[/analyze] source-target detection failed: {e}")
+            source_target_report = {
+                "csv_source_detection": [],
+                "document_data_lineage": {
+                    "data_source": {
+                        "name": "ADF (Azure Data Factory)",
+                        "type": "Data Integration Service",
+                        "evidence": "Fallback (detector failure).",
+                    },
+                    "data_target": {
+                        "name": "Downstream Process System",
+                        "type": "Downstream System",
+                        "evidence": None,
+                    },
+                    "detection_method": "fallback",
+                    "fallback_applied": True,
+                    "fallback_reason": "Source/target detector raised an exception.",
+                },
+            }
+
+        api_dict = result.to_api()
+        api_dict["csv_source_detection"]  = source_target_report["csv_source_detection"]
+        api_dict["document_data_lineage"] = source_target_report["document_data_lineage"]
+        return jsonify(api_dict), 200
 
     except ValueError as e:
         logger.error(f"Analysis config error: {e}")
         return jsonify({"error": str(e)}), 400
-
     except Exception as e:
         logger.error(f"Analysis failed: {e}", exc_info=True)
         return jsonify({"error": "Analysis failed. Please try again."}), 500
 
-# ── Process CRUD ──────────────────────────────────────────────────────────────
 
+# ── Process CRUD ──────────────────────────────────────────────────────────────
 @api_bp.get("/processes")
 def list_processes():
     try:
@@ -267,56 +249,52 @@ def get_automation(process_key: str):
 
 @api_bp.get("/processes/<_key>/flow")
 def get_react_flow(_key: str):
-    """
-    Returns the process data mapped specifically for the React Flow frontend.
-    """
+    """Returns the process data mapped specifically for the React Flow frontend."""
     try:
-        # Pass the _key value to your service
         flow_data = analysis_service.get_react_flow_data(_key)
-        
         if not flow_data.get("lanes") or not flow_data.get("flow"):
             return jsonify({"error": "No flow data"}), 404
-            
         return jsonify(flow_data)
     except Exception as e:
         logger.error(f"Get React flow error: {e}", exc_info=True)
         return jsonify({"error": "Could not fetch process flow data"}), 500
 
-    
-# ── RAG Chat ──────────────────────────────────────────────────────────────
+
+# ── RAG Chat (LEGACY — kept for backwards-compat; prefer /chatbot/ask) ───────
 @api_bp.post("/chat")
 def chat():
     data = request.json
-
     query = data.get("query")
     process_key = data.get("process_key")
-
     if not query:
         return jsonify({"error": "Query required"}), 400
 
-    response = rag_query(query, process_key)
-    # optional: graph url build
+    # Route legacy callers through the new scoped chatbot service so the
+    # behaviour is identical regardless of which endpoint the client uses.
+    from app.services.chatbot_service import answer_query
+    result = answer_query(query, process_key)
+
     graph_url = None
     if process_key:
         BASE_URL = os.getenv("BASE_URL")
         graph_url = f"{BASE_URL}/graphs/{process_key}/graph.html"
 
     return jsonify({
-        "query": query,
-        "answer": response,
-        "graph_url": graph_url   
+        "query":       query,
+        "answer":      result["answer"],
+        "in_scope":    result["in_scope"],
+        "intent":      result["intent"],
+        "graph_url":   graph_url,
     })
+
 
 @api_bp.get("/suggestions/<suggestion_key>/architecture")
 def get_agent_architecture(suggestion_key: str):
     try:
         result = analysis_service.get_agent_architecture(suggestion_key)
-
         if not result:
             return jsonify({"error": "Suggestion not found"}), 404
-
         return jsonify(result)
-
     except Exception as e:
         logger.error(f"Architecture fetch error: {e}", exc_info=True)
         return jsonify({"error": "Could not fetch architecture"}), 500
@@ -326,17 +304,11 @@ def get_agent_architecture(suggestion_key: str):
 def simulate(process_key):
     try:
         data = analysis_service.get_process(process_key)
-
         if not data:
             return jsonify({"error": "Process not found"}), 404
-
         steps = data["steps"]
         suggestions = data["suggestions"]
-
         result = simulation_service.run_simulation(steps, suggestions)
-
         return jsonify(result)
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-

@@ -42,4 +42,10 @@ def create_app() -> Flask:
     from app.api.routes import api_bp
     app.register_blueprint(api_bp)
 
+    from flask import send_from_directory
+    @app.route('/uploads/<path:filename>')
+    def serve_uploads(filename):
+        uploads_dir = os.path.abspath(os.path.join(app.root_path, "..", "uploads"))
+        return send_from_directory(uploads_dir, filename)
+
     return app

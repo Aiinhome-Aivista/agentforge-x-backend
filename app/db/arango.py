@@ -5,6 +5,7 @@ Edge collections: has_step, leads_to, triggers_suggestion, belongs_to_module
 """
 
 from arango import ArangoClient
+# pyrefly: ignore [missing-import]
 from arango.exceptions import DatabaseCreateError, CollectionCreateError, GraphCreateError
 import os
 import logging
