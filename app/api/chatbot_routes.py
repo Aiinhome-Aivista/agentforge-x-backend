@@ -39,6 +39,7 @@ from flask import Blueprint, request, jsonify
 
 from app.services.chatbot_service   import answer_query, OUT_OF_SCOPE_MESSAGE
 from app.services.reanalysis_service import reanalyze_process, list_context_revisions
+from app.services.discovery_service  import discover_process_gaps
 
 logger = logging.getLogger(__name__)
 
@@ -154,4 +155,86 @@ def get_context_revisions(process_key: str):
             "status":    False,
             "message":   "Could not load context revisions.",
             "revisions": [],
+        }), 500
+
+
+def _discovery_response(process_key: str):
+    """Shared handler for the POST and GET discovery routes."""
+    process_key = (process_key or "").strip()
+    if not process_key:
+        return jsonify({
+            "status":  False,
+            "message": "process_key is required.",
+        }), 400
+    try:
+        result = discover_process_gaps(process_key)
+        return jsonify({
+            "status":              True,
+            "process_key":         result.get("process_key", process_key),
+            "summary":             result.get("summary", ""),
+            "identified_gaps":     result.get("identified_gaps", []),
+            "follow_up_questions": result.get("follow_up_questions", []),
+        }), 200
+    except Exception as e:
+        logger.error(f"[chatbot/discover] failure: {e}", exc_info=True)
+        return jsonify({
+            "status":              False,
+            "message":             "Could not generate discovery questions.",
+            "process_key":         process_key,
+            "summary":             "",
+            "identified_gaps":     [],
+            "follow_up_questions": [],
+        }), 500
+
+
+@chatbot_bp.post("/chatbot/discover")
+def discover_chatbot():
+    """
+    Process Discovery Assistant — returns gap analysis + follow-up questions.
+    Body: { "process_key": "<required>" }
+    """
+    data = request.get_json(silent=True) or {}
+    process_key = data.get("process_key") or data.get("processKey") or ""
+    return _discovery_response(process_key)
+
+
+@chatbot_bp.get("/chatbot/<process_key>/discover")
+def discover_chatbot_get(process_key: str):
+    """GET convenience variant of the discovery endpoint."""
+    return _discovery_response(process_key)
+
+
+@chatbot_bp.post("/chatbot/onboarding")
+def onboarding_chat():
+    """
+    Onboarding Chat Assistant
+    Body: { "message": "...", "history": [{"role": "user"|"assistant", "content": "..."}] }
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        message = data.get("message", "").strip()
+        history = data.get("history", [])
+
+        from app.prompts.prompts import SYSTEM_ONBOARDING_ASSISTANT
+        from app.core.mistral_client import get_mistral_client
+        llm = get_mistral_client()
+
+        conversation = ""
+        for msg in history:
+            role = "AgentForgeX" if msg.get("role") == "assistant" else "User"
+            conversation += f"{role}: {msg.get('content')}\n"
+        conversation += f"User: {message}\n"
+
+        response = llm._chat_json(SYSTEM_ONBOARDING_ASSISTANT, conversation, temperature=0.3, expect="object")
+        return jsonify({
+            "status": True,
+            "response": response.get("response", "I'm sorry, could you repeat that?"),
+            "flow_complete": response.get("flow_complete", False),
+            "final_summary": response.get("final_summary", None)
+        }), 200
+    except Exception as e:
+        logger.error(f"[chatbot/onboarding] failure: {e}", exc_info=True)
+        return jsonify({
+            "status": False,
+            "message": "Onboarding chat failed."
         }), 500

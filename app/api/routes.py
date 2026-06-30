@@ -33,6 +33,7 @@ from app.api.technical_design_routes import technical_design_bp
 from app.api.chatbot_routes import chatbot_bp                # ⬅️ NEW
 from app.api.code_generation_routes import code_gen_bp       # ⬅️ NEW
 from app.api.blueprint_export_routes import blueprint_export_bp  # ⬅️ NEW (blueprint export API)
+from app.api.sme_routes import sme_bp                          # ⬅️ NEW (SME-driven workflow)
 
 from app.services.source_detector_service import (             # ⬅️ NEW
     build_source_target_report,
@@ -55,6 +56,7 @@ api_bp.register_blueprint(technical_design_bp)
 api_bp.register_blueprint(chatbot_bp)        # ⬅️ NEW
 api_bp.register_blueprint(code_gen_bp)       # ⬅️ NEW
 api_bp.register_blueprint(blueprint_export_bp)  # ⬅️ NEW (GET /processes/<key>/blueprint-export)
+api_bp.register_blueprint(sme_bp)               # ⬅️ NEW (/sme/ingest, /sme/chat, /sme/finalize)
 register_auth_gate(api_bp)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"}
@@ -122,6 +124,10 @@ def analyze():
         session_id = str(uuid.uuid4())
 
     user_input = request.form.get("user_input", "").strip()
+    mission_vision = request.form.get("mission_vision_context", "").strip()
+    if mission_vision:
+        user_input = f"Company Mission & Vision:\n{mission_vision}\n\n{user_input}".strip()
+
     uploaded = request.files.getlist("files") if "files" in request.files else []
 
     if not uploaded and not user_input:

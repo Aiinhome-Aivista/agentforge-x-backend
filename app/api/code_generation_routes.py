@@ -32,13 +32,14 @@ def _slug(s: str) -> str:
     return s or "agentforgex"
 
 
-@code_gen_bp.get("/suggestions/<suggestion_key>/download-code")
+@code_gen_bp.post("/suggestions/<suggestion_key>/download-code")
 def download_code(suggestion_key: str):
     """
     Builds a ZIP scaffold tailored to the suggestion + its parent process +
     its technical design.  Returned inline as an attachment.
     """
     try:
+        from flask import request
         db = get_db()
         col = db.collection
 
@@ -67,7 +68,11 @@ def download_code(suggestion_key: str):
             technical_design = _build_technical_design(ctx, header, dyn)
         except Exception as e:
             logger.warning(f"[code-gen] technical-design fetch failed, using minimal: {e}")
-            technical_design = {"sections": []}
+            try:
+                from app.api.technical_design_routes import _DEF_AGENTS, _DEF_TOOLS
+                technical_design = {"sections": [], "agents": _DEF_AGENTS, "tools": _DEF_TOOLS}
+            except Exception:
+                technical_design = {"sections": [], "agents": [], "tools": []}
 
         # Use the stored data lineage if present, else ADF default.
         data_lineage = (process or {}).get("data_lineage") or {
@@ -80,6 +85,28 @@ def download_code(suggestion_key: str):
                 "type": "Downstream System",
             },
         }
+
+        # Attempt to override tech stack based on chat history
+        chat_history = []
+        if request.is_json:
+            chat_history = request.get_json(silent=True).get("chat_history", [])
+        
+        if chat_history:
+            try:
+                from app.core.mistral_client import get_mistral_client
+                llm = get_mistral_client()
+                chat_text = "\n".join([f"{msg.get('sender') or msg.get('role')}: {msg.get('text') or msg.get('content')}" for msg in chat_history])
+                prompt = (
+                    "Extract the technology stack mentioned in this chat history.\n"
+                    f"Chat:\n{chat_text}\n\n"
+                    "Return ONLY JSON strictly in this format (and ONLY include what is explicitly mentioned, else use defaults):\n"
+                    "{\"data_source\": {\"name\": \"...\", \"type\": \"...\"}, \"data_target\": {\"name\": \"...\", \"type\": \"...\"}}"
+                )
+                resp = llm._chat_json(prompt, "Return valid JSON", expect="object")
+                if resp and "data_source" in resp and "name" in resp["data_source"]:
+                    data_lineage = resp
+            except Exception as e:
+                logger.warning(f"[code-gen] Failed to extract tech stack from chat history: {e}")
 
         zip_bytes = build_code_zip(
             suggestion=suggestion,

@@ -888,6 +888,8 @@ def _build_technical_design(ctx: dict, header: dict, dyn: dict) -> dict:
         "automation_logic":        automation_logic,
         "recommendations":         recommendations,
         "suggestion_blueprints":   suggestion_sections,
+        "agents":                  agents,
+        "tools":                   tools,
 
         "chatbot_special_considerations": {
             "termination_design": {"conditions": chatbot.get("termination_conditions")},

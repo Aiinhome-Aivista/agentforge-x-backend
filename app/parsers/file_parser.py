@@ -25,6 +25,10 @@ def detect_source_type(filename: str) -> str:
         "csv": "csv",
         "xlsx": "erp_dump",
         "xls": "erp_dump",
+        "eml": "email",
+        "log": "txt",
+        "md": "txt",
+        "json": "txt",
     }
     return mapping.get(ext, "txt")
 
@@ -45,7 +49,48 @@ def parse_file(file_bytes: bytes, filename: str) -> Tuple[str, Dict[str, Any]]:
         return _parse_csv(file_bytes, filename)
     elif source_type == "erp_dump":
         return _parse_xlsx(file_bytes, filename)
+    elif source_type == "email":
+        return _parse_eml(file_bytes)
     else:
+        return _parse_txt(file_bytes)
+
+
+# ── Email (.eml) ──────────────────────────────────────────────────────────────
+
+def _parse_eml(file_bytes: bytes) -> Tuple[str, Dict]:
+    """Parse an RFC-822 email: headers + plain-text body (HTML stripped)."""
+    try:
+        import email
+        from email import policy
+
+        msg = email.message_from_bytes(file_bytes, policy=policy.default)
+        headers = {k: str(msg.get(k, "")) for k in
+                   ("From", "To", "Cc", "Date", "Subject")}
+        body_parts = []
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            if ctype == "text/plain":
+                try:
+                    body_parts.append(part.get_content())
+                except Exception:
+                    pass
+        if not body_parts:
+            # Fall back to HTML with tags stripped
+            import re
+            for part in msg.walk():
+                if part.get_content_type() == "text/html":
+                    try:
+                        html = part.get_content()
+                        body_parts.append(re.sub(r"<[^>]+>", " ", html))
+                    except Exception:
+                        pass
+
+        header_text = "\n".join(f"{k}: {v}" for k, v in headers.items() if v)
+        text = header_text + "\n\n" + "\n".join(body_parts)
+        metadata = {"source_type": "email", **{k.lower(): v for k, v in headers.items()}}
+        return text.strip(), metadata
+    except Exception as e:
+        logger.warning(f"EML parse failed, treating as text: {e}")
         return _parse_txt(file_bytes)
 
 

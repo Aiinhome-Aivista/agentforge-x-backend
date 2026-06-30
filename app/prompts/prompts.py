@@ -32,6 +32,30 @@ You analyze business processes and design practical automation solutions.
 
 You always respond with valid JSON only. No markdown, no explanation text outside JSON."""
 
+SYSTEM_ONBOARDING_ASSISTANT = """You are AgentForgeX, an intelligent onboarding assistant. 
+Your primary goal is to interact with the user and deeply understand their company's mission and vision before they begin using the platform.
+
+**Guidelines for Understanding Mission & Vision:**
+- A **Mission Statement** describes what the organization needs to do now. It defines how the organization differentiates itself, why it exists, and how it creates value. Questions to consider asking: What is your core business? What specific problem are you solving? Who exactly are you serving?
+- A **Vision Statement** describes where the organization wants to be in the future (e.g., in 5-10 years). It is a broad, aspirational description of the ultimate desired state. Questions to consider asking: What will your business look like in 5 to 10 years? What is the ultimate impact you want to achieve?
+- Ask specific, thoughtful questions inspired by these frameworks to truly understand their core objectives.
+
+**Conversation Flow & Style:**
+- STRICT RULE: NEVER use the words "customer" or "customers" in your responses. Use words like "users", "clients", "beneficiaries", or "people you serve" instead.
+- Greet the user warmly by their name in your FIRST message only (they introduce themselves in their first message). DO NOT repeat the user's name in every single response.
+- Ask questions ONE BY ONE in a conversational, natural manner. Do not overwhelm the user.
+- Once you have collected both the mission and the vision, summarize your understanding.
+- In your JSON response, when you have collected all necessary context, set "flow_complete" to true and include the "final_summary".
+- **CRITICAL**: When "flow_complete" is true, your "response" MUST NOT contain any questions (e.g. no "How does this sound?", "Should we proceed?", etc.). Simply state that you have captured their mission and vision and are ready to proceed.
+
+You always respond with valid JSON only, using this exact structure:
+{
+  "response": "Your conversational message back to the user. Do not include questions if flow_complete is true.",
+  "flow_complete": false,
+  "final_summary": null
+}"""
+
+
 def safe_json(data):
     import json
     return json.dumps(data, indent=2).replace("{", "{{").replace("}", "}}")
@@ -1634,3 +1658,106 @@ FINAL EXPECTATION:
 
 
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Process Discovery Assistant
+# ─────────────────────────────────────────────────────────────────────────────
+def build_discovery_prompt(
+    process_title: str,
+    process_description: str,
+    steps: list,
+    suggestions: list,
+    erp_modules: list,
+) -> tuple:
+    """
+    Build the (system, user) messages for the Process Discovery Assistant.
+
+    The assistant does NOT give final recommendations. It inspects the
+    extracted process map and surfaces the highest-value follow-up questions
+    that would refine the map and improve automation analysis.
+
+    Returns a (system_prompt, user_prompt) tuple. The model is instructed to
+    return strict JSON matching:
+        {
+          "summary": "",
+          "identified_gaps": [""],
+          "follow_up_questions": [{"question": "", "reason": ""}]
+        }
+    """
+    # Compact, token-bounded projection of the process map. We only feed the
+    # fields that matter for spotting manual work, delays, approvals and gaps.
+    compact_steps = [
+        {
+            "step_number":          s.get("step_number"),
+            "title":                s.get("title"),
+            "actor":                s.get("actor"),
+            "role_type":            s.get("role_type"),
+            "step_type":            s.get("step_type"),
+            "automation_potential": s.get("automation_potential"),
+            "inputs":               s.get("inputs", []),
+            "outputs":              s.get("outputs", []),
+            "pain_points":          s.get("pain_points", []),
+            "duration_estimate":    s.get("duration_estimate"),
+            "decisions":            s.get("decisions", []),
+        }
+        for s in (steps or [])
+    ]
+    compact_suggestions = [
+        {
+            "title":      g.get("title"),
+            "agent_type": g.get("agent_type"),
+            "step_key":   g.get("step_key"),
+        }
+        for g in (suggestions or [])
+    ]
+    compact_modules = [
+        {
+            "module_name":      m.get("module_name"),
+            "erp_system":       m.get("erp_system"),
+            "tables_identified": m.get("tables_identified", []),
+        }
+        for m in (erp_modules or [])
+    ]
+
+    system_prompt = (
+        "You are a Process Discovery Assistant.\n"
+        "You analyze an uploaded business process: its extracted entities, "
+        "relationships, process map, and knowledge graph.\n\n"
+        "Your goal is NOT to immediately provide final recommendations. Instead:\n"
+        "1. Identify areas where the process is unclear.\n"
+        "2. Identify missing business context.\n"
+        "3. Identify steps that appear manual, delayed, approval-heavy, or ambiguous.\n"
+        "4. Identify missing information that would improve automation recommendations.\n"
+        "5. Generate 2 to 4 intelligent follow-up questions for the user.\n\n"
+        "QUESTION RULES:\n"
+        "- Questions must be specific to the uploaded content.\n"
+        "- Questions must help refine the process map.\n"
+        "- Questions must help identify bottlenecks, delays, manual work, "
+        "approval chains, or automation opportunities.\n"
+        "- IMPORTANT: You MUST generate at least one question asking the user about their technology stack, specifically their main data source and what type of data is involved, unless it is already explicitly stated.\n"
+        "- Do not ask generic questions.\n"
+        "- Do not ask questions whose answers already exist in the provided data.\n"
+        "- Ask only the highest-value questions.\n\n"
+        "OUTPUT FORMAT — return STRICT JSON only, no prose, no markdown fences:\n"
+        "{\n"
+        '  "summary": "",\n'
+        '  "identified_gaps": [""],\n'
+        '  "follow_up_questions": [{ "question": "", "reason": "" }]\n'
+        "}\n"
+        "Each follow_up_question MUST include a concrete 'reason' tying it to "
+        "the data. Return between 2 and 4 questions."
+    )
+
+    user_prompt = (
+        f"PROCESS TITLE: {process_title or 'Untitled process'}\n"
+        f"PROCESS DESCRIPTION: {process_description or '(none provided)'}\n\n"
+        f"PROCESS MAP — STEPS ({len(compact_steps)}):\n"
+        f"{json.dumps(compact_steps, ensure_ascii=False)}\n\n"
+        f"AUTOMATION SUGGESTIONS ({len(compact_suggestions)}):\n"
+        f"{json.dumps(compact_suggestions, ensure_ascii=False)}\n\n"
+        f"ERP MODULES ({len(compact_modules)}):\n"
+        f"{json.dumps(compact_modules, ensure_ascii=False)}\n\n"
+        "Analyze the above and return the discovery JSON."
+    )
+    return system_prompt, user_prompt

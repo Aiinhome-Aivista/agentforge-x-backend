@@ -36,7 +36,7 @@ def create_app() -> Flask:
         origins=origins,
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
     from app.api.routes import api_bp

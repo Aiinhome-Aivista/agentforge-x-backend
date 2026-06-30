@@ -69,6 +69,7 @@ def create_workspace():
     session_id = body.get("session_id")
     user_input = body.get("user_input")
     analysis = body.get("analysis")
+    chat_history = body.get("chat_history")
 
     # Be lenient: accept the analyze response either nested under "analysis"
     # (the explicit contract) or unwrapped at the top level.
@@ -87,6 +88,7 @@ def create_workspace():
             session_id=session_id,
             user_input=user_input,
             analysis_data=analysis,
+            chat_history=chat_history,
         )
     except QuotaExceeded as qe:
         return _err(
@@ -141,3 +143,44 @@ def delete_workspace(ws_id: int):
         return _err("Workspace not found", 404)
     return _ok("Workspace deleted", data={"id": ws_id},
                quota=workspace_service.get_quota(uid))
+
+# ── Update Chat History ─────────────────────────────────────────────────────
+@workspace_bp.patch("/<int:ws_id>/chat")
+@require_auth
+def update_workspace_chat(ws_id: int):
+    uid = g.user["uid"]
+    body = request.get_json(silent=True) or {}
+    chat_history = body.get("chat_history")
+    
+    if chat_history is None:
+        return _err("Field 'chat_history' is required", 400)
+        
+    try:
+        updated = workspace_service.update_chat_history(uid, ws_id, chat_history)
+        if not updated:
+            return _err("Workspace not found", 404)
+        return _ok("Chat history updated")
+    except Exception as e:
+        logger.error("update_workspace_chat failed: %s", e, exc_info=True)
+        return _err("Could not update chat history", 500)
+
+
+# ── Update Analysis Data ────────────────────────────────────────────────────
+@workspace_bp.patch("/<int:ws_id>/analysis")
+@require_auth
+def update_workspace_analysis(ws_id: int):
+    uid = g.user["uid"]
+    body = request.get_json(silent=True) or {}
+    analysis = body.get("analysis")
+    
+    if analysis is None:
+        return _err("Field 'analysis' is required", 400)
+        
+    try:
+        updated = workspace_service.update_workspace_analysis(uid, ws_id, analysis)
+        if not updated:
+            return _err("Workspace not found", 404)
+        return _ok("Analysis data updated")
+    except Exception as e:
+        logger.error("update_workspace_analysis failed: %s", e, exc_info=True)
+        return _err("Could not update analysis data", 500)

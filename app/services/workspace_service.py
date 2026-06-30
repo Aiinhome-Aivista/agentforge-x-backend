@@ -134,7 +134,7 @@ def get_workspace(user_id: int, workspace_id: int) -> Optional[Dict[str, Any]]:
         cur.execute(
             """
             SELECT id, user_id, name, session_id, process_key, user_input,
-                   analysis_data, data_size_mb, created_at, updated_at
+                   analysis_data, chat_history, data_size_mb, created_at, updated_at
               FROM workspaces
              WHERE id=%s AND user_id=%s LIMIT 1
             """,
@@ -152,6 +152,14 @@ def get_workspace(user_id: int, workspace_id: int) -> Optional[Dict[str, Any]]:
             except (ValueError, TypeError):
                 # Leave as-is if it isn't valid JSON for any reason.
                 pass
+        
+        ch = row.get("chat_history")
+        if isinstance(ch, (str, bytes, bytearray)):
+            try:
+                row["chat_history"] = json.loads(ch)
+            except (ValueError, TypeError):
+                pass
+
         return row
     finally:
         cur.close()
@@ -198,6 +206,7 @@ def create_workspace(
     session_id: Optional[str] = None,
     user_input: Optional[str] = None,
     analysis_data: Optional[Dict[str, Any]] = None,
+    chat_history: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Create a workspace, enforcing plan-based quota.
 
@@ -208,6 +217,7 @@ def create_workspace(
     process_key = _process_key_from_analysis(analysis_data)
     size_mb = _coerce_size_mb(analysis_data)
     payload = json.dumps(analysis_data, default=str) if analysis_data is not None else None
+    chat_payload = json.dumps(chat_history, default=str) if chat_history is not None else None
 
     quota_before = get_quota(user_id)
     if quota_before["used"] >= quota_before["allowed"]:
@@ -220,10 +230,10 @@ def create_workspace(
             """
             INSERT INTO workspaces
                 (user_id, name, session_id, process_key, user_input,
-                 analysis_data, data_size_mb)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                 analysis_data, chat_history, data_size_mb)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (user_id, name, session_id, process_key, user_input, payload, size_mb),
+            (user_id, name, session_id, process_key, user_input, payload, chat_payload, size_mb),
         )
         new_id = cur.lastrowid
         conn.commit()
@@ -268,6 +278,47 @@ def rename_workspace(user_id: int, workspace_id: int, new_name: str) -> bool:
         cur.execute(
             "UPDATE workspaces SET name=%s WHERE id=%s AND user_id=%s",
             (new_name, workspace_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_chat_history(user_id: int, workspace_id: int, chat_history: List[Dict[str, Any]]) -> bool:
+    """Updates the chat_history for a specific workspace."""
+    chat_payload = json.dumps(chat_history, default=str) if chat_history is not None else None
+    conn = get_mysql_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE workspaces SET chat_history=%s WHERE id=%s AND user_id=%s",
+            (chat_payload, workspace_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+
+def update_workspace_analysis(user_id: int, workspace_id: int, analysis_data: Dict[str, Any]) -> bool:
+    """Updates the analysis_data for a specific workspace (used when re-analyzing)."""
+    payload = json.dumps(analysis_data, default=str) if analysis_data is not None else None
+    size_mb = _coerce_size_mb(analysis_data)
+    conn = get_mysql_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE workspaces SET analysis_data=%s, data_size_mb=%s WHERE id=%s AND user_id=%s",
+            (payload, size_mb, workspace_id, user_id),
         )
         conn.commit()
         return cur.rowcount > 0

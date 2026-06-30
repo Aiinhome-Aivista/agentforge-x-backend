@@ -33,61 +33,44 @@ def run_agent_process():
             "SELECT id, steps FROM analysis_results WHERE session_id = %s ORDER BY id DESC LIMIT 1",
             (session_id,)
         )
-
-
         row = cursor.fetchone()
-
-        if not row or not row["steps"]:
-            return jsonify({
-                "status": "error",
-                "message": "No steps data found"
-            }), 404
-
-        import json
-        steps_json = row["steps"]
-
-        if isinstance(steps_json, str):
-            steps_json = json.loads(steps_json)
-
-        # 🔹 2. Find step
+        
         step = None
 
-        for s in steps_json:
-            if (
-                s.get("step_key") == step_key or
-                s.get("_key") == step_key or
-                s.get("id") == step_key
-            ):
-                step = s
-                break
+        if row and row["steps"]:
+            import json
+            steps_json = row["steps"]
 
+            if isinstance(steps_json, str):
+                steps_json = json.loads(steps_json)
 
+            # 🔹 2. Find step
+            for s in steps_json:
+                if (
+                    s.get("step_key") == step_key or
+                    s.get("_key") == step_key or
+                    s.get("id") == step_key
+                ):
+                    step = s
+                    break
+            
+            # 🔹 3. Update automation_potential = 0 in JSON
+            if step:
+                updated_flag = False
+                for s in steps_json:
+                    if (
+                        s.get("step_key") == step_key or
+                        s.get("_key") == step_key or
+                        s.get("id") == step_key
+                    ):
+                        s["automation_potential"] = 0
+                        updated_flag = True
 
-        if not step:
-            return jsonify({
-                "status": "error",
-                "message": "Step not found"
-            }), 404
-
-        # 🔹 3. Update automation_potential = 0 in JSON
-        updated_flag = False
-
-        for s in steps_json:
-            if (
-                s.get("step_key") == step_key or
-                s.get("_key") == step_key or
-                s.get("id") == step_key
-            ):
-                s["automation_potential"] = 0
-                updated_flag = True
-
-
-
-        if updated_flag:
-            cursor.execute(
-                "UPDATE analysis_results SET steps = %s WHERE id = %s",
-                (json.dumps(steps_json), row["id"])
-            )
+                if updated_flag:
+                    cursor.execute(
+                        "UPDATE analysis_results SET steps = %s WHERE id = %s",
+                        (json.dumps(steps_json), row["id"])
+                    )
 
         # 🔹 4. Insert / Update agent_runs table
         cursor.execute("""
@@ -96,7 +79,7 @@ def run_agent_process():
             ON DUPLICATE KEY UPDATE
                 status = 'executed',
                 automation_potential = 0
-        """, (step_key, step.get("process_key")))
+        """, (step_key, step.get("process_key") if step else None))
 
         conn.commit()
 

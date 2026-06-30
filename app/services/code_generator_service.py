@@ -510,29 +510,32 @@ def build_code_zip(
         process.get("title") or process.get("name") or "Business Process"
     )
 
-    # Pull agents + tools straight from the technical-design payload so the
-    # generated code matches what's shown in the export documents.
+    # Pull agents + tools straight from the technical-design payload.
+    # We prefer the top-level fields since Layer 3 (Agentic Core) is intentionally omitted from architecture_layers.
+    agents_raw = technical_design.get("agents", [])
+    tools_raw = technical_design.get("tools", [])
+
     agents: List[Dict[str, Any]] = []
     tools:  List[Dict[str, Any]] = []
-    for section in technical_design.get("sections", []) or []:
-        for layer in section.get("architecture_layers", []) or []:
-            for a in (layer.get("agents") or []):
-                if isinstance(a, dict):
-                    agents.append({
-                        "name":                  a.get("name", "Agent"),
-                        "role":                  a.get("role", ""),
-                        "responsibilities":      a.get("responsibilities") or [],
-                        "reasoning_framework":   a.get("reasoning_framework"),
-                        "model_tier":            a.get("model_tier"),
-                    })
-        for t in section.get("tools", []) or []:
-            if isinstance(t, dict):
-                tools.append({
-                    "name":        t.get("tool_name") or t.get("name") or "Tool",
-                    "tool_name":   t.get("tool_name") or t.get("name") or "Tool",
-                    "purpose":     t.get("purpose", ""),
-                    "invoked_by":  t.get("invoked_by", ""),
-                })
+
+    for a in agents_raw:
+        if isinstance(a, dict):
+            agents.append({
+                "name":                  a.get("name", "Agent"),
+                "role":                  a.get("role", ""),
+                "responsibilities":      a.get("responsibilities") or [],
+                "reasoning_framework":   a.get("reasoning_framework"),
+                "model_tier":            a.get("model_tier"),
+            })
+
+    for t in tools_raw:
+        if isinstance(t, dict):
+            tools.append({
+                "name":        t.get("tool_name") or t.get("name") or "Tool",
+                "tool_name":   t.get("tool_name") or t.get("name") or "Tool",
+                "purpose":     t.get("purpose", ""),
+                "invoked_by":  t.get("invoked_by", ""),
+            })
 
     # Deduplicate by name to avoid double files
     seen_a, uniq_a = set(), []

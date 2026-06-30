@@ -33,10 +33,23 @@ MAX_RETRIES = 2
 class MistralClient:
     def __init__(self):
         self.mode = (os.getenv("MISTRAL_MODE") or "").lower()
-        if self.mode == "local":
+        self.is_local = self.mode == "local"
+        if self.is_local:
             self.model = os.getenv("MISTRAL_LOCAL_MODEL")
             local_url = os.getenv("MISTRAL_LOCAL_URL")
-            self.client = Mistral(api_key="local", server_url=local_url)
+            if not self.model:
+                raise ValueError("MISTRAL_LOCAL_MODEL environment variable not set")
+            if not local_url:
+                raise ValueError("MISTRAL_LOCAL_URL environment variable not set")
+            # Local models are much slower than the cloud API, so give them a
+            # generous timeout (default SDK timeout can abort long generations
+            # and surface as empty/failed responses).
+            local_timeout_ms = int(os.getenv("MISTRAL_LOCAL_TIMEOUT_MS") or 600000)
+            self.client = Mistral(
+                api_key="local",
+                server_url=local_url,
+                timeout_ms=local_timeout_ms,
+            )
         else:
             api_key = os.getenv("MISTRAL_API_KEY")
             if not api_key:
@@ -50,20 +63,31 @@ class MistralClient:
         tokens_str = os.getenv("LLM_MAX_TOKENS")
         self.default_max_tokens = int(tokens_str) if tokens_str else 4096
 
-    def _chat(self, system: str, user: str, temperature: float = None) -> str:
+    def _chat(self, system: str, user: str, temperature: float = None, force_json: bool = False) -> str:
         temp = temperature if temperature is not None else self.default_temp
+        
+        kwargs = dict(
+            model=self.model,
+            temperature=temp,
+            max_tokens=self.default_max_tokens,
+        )
+        if force_json and not self.is_local:
+            kwargs["response_format"] = {"type": "json_object"}
+
         for attempt in range(MAX_RETRIES + 1):
             try:
                 response = self.client.chat.complete(
-                    model=self.model,
                     messages=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    temperature=temp,
-                    max_tokens=self.default_max_tokens,
+                    **kwargs
                 )
-                return response.choices[0].message.content
+                content = response.choices[0].message.content
+                # Some local backends return null content instead of a string.
+                # Coerce to "" so downstream _parse_json degrades gracefully
+                # instead of raising on None.strip().
+                return content if isinstance(content, str) else ""
             except Exception as e:
                 if attempt == MAX_RETRIES:
                     raise
@@ -170,15 +194,81 @@ class MistralClient:
                             max_json = candidate
 
         return max_json if max_json else None
+
+    @staticmethod
+    def _is_empty_parse(parsed) -> bool:
+        """True when parsing produced nothing usable (None or empty dict/list)."""
+        if parsed is None:
+            return True
+        if isinstance(parsed, (dict, list, str)) and len(parsed) == 0:
+            return True
+        return False
+
+    def _chat_json(self, system: str, user: str, temperature: float = None,
+                   expect: str = "object", force_json: bool = False):
+        """
+        Chat and parse JSON. If the model returns prose / non-JSON (common with
+        local models that don't follow the 'return JSON' instruction as well as
+        the cloud model), reprompt once forcefully and parse again.
+
+        Cloud behavior is unchanged: its first response parses successfully, so
+        _is_empty_parse is False and no reprompt happens.
+        """
+        raw = self._chat(system, user, temperature=temperature, force_json=force_json)
+        parsed = self._parse_json(raw)
+        if self._is_empty_parse(parsed):
+            opener = "[" if expect == "array" else "{"
+            kind = "array" if expect == "array" else "object"
+            reinforce = (
+                user
+                + f"\n\nIMPORTANT: Respond with ONLY a single valid JSON {kind}. "
+                  f"Do NOT include any explanation, summary, prose, or markdown "
+                  f"fences. Your entire reply must start with '{opener}'."
+            )
+            logger.warning("LLM returned non-JSON; reprompting for strict JSON output.")
+            raw = self._chat(system, reinforce, temperature=temperature, force_json=force_json)
+            parsed = self._parse_json(raw)
+        return parsed
+
     # ── Public API ────────────────────────────────────────────────────────────
 
     def extract_process(self, text: str, source_type: str, file_name: str) -> Dict:
         """Pass 1: Extract process structure from document."""
         prompt = build_extraction_prompt(text, source_type, file_name)
-        raw = self._chat(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.1)
-        result = self._parse_json(raw)
+        result = self._chat_json(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.1, expect="object")
+        result = self._normalize_extraction(result)
+
+        # Local models often return valid JSON but with an EMPTY steps array
+        # (or prose, which _chat_json already retries). If we still have no
+        # steps, reprompt once forcefully and explicitly demand the steps array.
+        if not result.get("steps"):
+            retry_prompt = prompt + (
+                "\n\nYour previous answer did not contain any steps. You MUST return "
+                "a single JSON object containing a non-empty \"steps\" array with at "
+                "least 5 atomic, sequential steps. Respond with ONLY the JSON object, "
+                "starting with '{' and ending with '}'. Do NOT write any summary, "
+                "explanation, analysis, or prose."
+            )
+            retry = self._chat_json(SYSTEM_PROCESS_ANALYST, retry_prompt, temperature=0.1, expect="object")
+            retry = self._normalize_extraction(retry)
+            if retry.get("steps"):
+                result = retry
+
         logger.info(f"Extraction complete: {len(result.get('steps', []))} steps found")
         return result
+
+    @staticmethod
+    def _normalize_extraction(result) -> Dict:
+        """Coerce extraction output into a {'steps': [...]} dict.
+
+        Local models sometimes return a bare list of steps instead of the
+        expected object, so downstream result.get('steps') stays safe.
+        """
+        if isinstance(result, list):
+            return {"steps": result}
+        if isinstance(result, dict):
+            return result
+        return {}
 
     # def score_automation(self, steps: List[Dict], process_context: str) -> List[Dict]:
     #     """Pass 2: Score automation potential for each step."""
@@ -263,12 +353,13 @@ class MistralClient:
     ) -> Dict:
         """Pass 4: Extract logical relationships for graph edges."""
         prompt = build_relationships_prompt(process_title, steps, erp_modules)
-        raw = self._chat(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.1)
+        default = {"step_sequences": [], "module_relationships": [], "cross_process_dependencies": []}
         try:
-            return self._parse_json(raw)
+            parsed = self._chat_json(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.1, expect="object")
+            return parsed if isinstance(parsed, dict) and parsed else default
         except Exception as e:
             logger.warning(f"Relationship extraction failed: {e}")
-            return {"step_sequences": [], "module_relationships": [], "cross_process_dependencies": []}
+            return default
 
 
     def generate_react_flow(self, process_title: str, steps: list, suggestions: list, workflow_type: str = "generic") -> dict:
@@ -276,20 +367,19 @@ class MistralClient:
         # ALWAYS use lane-based prompt
         prompt = build_react_flow_prompt(process_title, steps, suggestions)
 
-
-        response = self.client.chat.complete(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_AUTOMATION_EXPERT},
-                {"role": "user",   "content": prompt}
-            ],
-            response_format={"type": "json_object"},
-            max_tokens=self.default_max_tokens,
-            temperature=self.default_temp
+        # Cloud Mistral supports forced JSON output. Many local backends
+        # (Ollama / llama.cpp / LM Studio, etc.) do NOT implement
+        # response_format=json_object and return EMPTY content when it is sent.
+        # So we request JSON mode on the cloud path via force_json=True, and locally 
+        # _chat_json handles the fallback and reprompting if it fails to parse.
+        parsed = self._chat_json(
+            SYSTEM_AUTOMATION_EXPERT, 
+            prompt, 
+            temperature=self.default_temp, 
+            expect="object",
+            force_json=True
         )
-        
-        raw = response.choices[0].message.content
-        return self._parse_json(raw)        
+        return parsed if isinstance(parsed, dict) else {}
 
 
     def decompose_micro_process(self, steps):
@@ -337,18 +427,14 @@ class MistralClient:
             suggestions
         )
 
-        response = self.client.chat.completions.create(
-            model="mistral-large-latest",  # or your model
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2
-        )
+        # NOTE: the Mistral SDK exposes chat.complete(...), NOT the OpenAI-style
+        # chat.completions.create(...). The old call raised AttributeError on
+        # both cloud and local, and hardcoded a model that does not exist in
+        # local mode. Route through _chat so it works for both backends.
+        raw = self._chat(SYSTEM_AUTOMATION_EXPERT, prompt, temperature=0.2)
 
-        content = response.choices[0].message.content
-
-        try:
-            return json.loads(content)
-        except Exception:
-            return {}
+        parsed = self._parse_json(raw)
+        return parsed if isinstance(parsed, dict) else {}
 # Singleton
 _client_instance = None
 
