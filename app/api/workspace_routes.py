@@ -70,6 +70,7 @@ def create_workspace():
     user_input = body.get("user_input")
     analysis = body.get("analysis")
     chat_history = body.get("chat_history")
+    uploaded_files_log = body.get("uploaded_files_log")
 
     # Be lenient: accept the analyze response either nested under "analysis"
     # (the explicit contract) or unwrapped at the top level.
@@ -89,6 +90,7 @@ def create_workspace():
             user_input=user_input,
             analysis_data=analysis,
             chat_history=chat_history,
+            uploaded_files_log=uploaded_files_log,
         )
     except QuotaExceeded as qe:
         return _err(

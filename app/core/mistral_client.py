@@ -230,6 +230,35 @@ class MistralClient:
             parsed = self._parse_json(raw)
         return parsed
 
+    
+    def validate_relevance(self, user_input: str, file_text: str) -> Dict:
+        """Check if the uploaded file is relevant to the user's mission/vision/input."""
+        if not user_input.strip():
+            return {"is_relevant": True}
+        
+        prompt = f"""
+        User's Mission/Vision and Context:
+        {user_input}
+        
+        Uploaded File Content Preview (first 2000 chars):
+        {file_text[:2000]}
+        
+        Task: Determine if the uploaded file content is relevant to the user's stated mission/vision. 
+        If it is relevant or if you are unsure, respond with {{"is_relevant": true}}.
+        If it is clearly irrelevant (e.g. they asked for HR onboarding but uploaded a restaurant menu), respond with:
+        {{
+            "is_relevant": false,
+            "error": "<Exact specific error explaining why it is irrelevant>",
+            "recommended_solution": "<A clear tip on what file they should upload instead>"
+        }}
+        """
+        try:
+            return self._chat_json(SYSTEM_PROCESS_ANALYST, prompt, temperature=0.1, expect="object")
+        except Exception as e:
+            logger.warning(f"Validation failed: {e}")
+            return {"is_relevant": True}
+
+    
     # ── Public API ────────────────────────────────────────────────────────────
 
     def extract_process(self, text: str, source_type: str, file_name: str) -> Dict:

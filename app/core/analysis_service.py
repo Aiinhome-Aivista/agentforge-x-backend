@@ -180,6 +180,44 @@ class AnalysisService:
                 f"=== USER INSTRUCTIONS ===\n{user_input}\n\n"
                 f"=== CONTEXT DATA ===\n{combined_text}"
             )
+            
+        # 🔥 NEW: Validate Relevance
+        relevance = llm.validate_relevance(user_input, combined_text)
+        if not relevance.get("is_relevant", True):
+            error_msg = relevance.get("error", "Irrelevant file.")
+            solution = relevance.get("recommended_solution", "Upload a relevant file.")
+            
+            # Minimal ProcessDocument for DB
+            err_doc = ProcessDocument(
+                title="Irrelevant File",
+                description="Validation Failed",
+                source_type=primary_source_type,
+                raw_text="",
+                automation_score=0,
+                status="error",
+                error=error_msg
+            )
+            
+            # Save to DB
+            try:
+                mysql_db = get_mysql_connection()
+                cursor = mysql_db.cursor()
+                cursor.execute("""
+                    INSERT INTO analysis_results
+                    (erp_modules, graph_url, key_insights, process, steps, suggestions,
+                     automation_targets, toc_analysis, session_id, upload_folder)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    "[]", "", "[]", json.dumps(err_doc.to_api()), "[]", "[]", "[]", "{}", session_id, upload_folder
+                ))
+                mysql_db.commit()
+                cursor.close()
+                mysql_db.close()
+            except Exception as e:
+                logger.error(f"MySQL error insert failed: {e}")
+                
+            raise ValueError(f"IRRELEVANT_FILE|{error_msg}|{solution}")
+
 
 
         # Step 2: LLM Pass 1 — Extraction
@@ -486,8 +524,8 @@ class AnalysisService:
             cursor.execute("""
                 INSERT INTO analysis_results
                 (erp_modules, graph_url, key_insights, process, steps, suggestions,
-                 automation_targets, toc_analysis,session_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s,%s)
+                 automation_targets, toc_analysis,session_id ,upload_folder)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s,%s,%s)
             """, (
                 json.dumps(serialize(erp_module_objects)),
                 graph_url,
@@ -498,6 +536,7 @@ class AnalysisService:
                 json.dumps(top_targets),
                 json.dumps(toc_dict),
                 session_id,
+                upload_folder
             ))
             mysql_db.commit()
             cursor.close()

@@ -134,7 +134,7 @@ def get_workspace(user_id: int, workspace_id: int) -> Optional[Dict[str, Any]]:
         cur.execute(
             """
             SELECT id, user_id, name, session_id, process_key, user_input,
-                   analysis_data, chat_history, data_size_mb, created_at, updated_at
+                   analysis_data, chat_history, uploaded_files_log, data_size_mb, created_at, updated_at
               FROM workspaces
              WHERE id=%s AND user_id=%s LIMIT 1
             """,
@@ -157,6 +157,13 @@ def get_workspace(user_id: int, workspace_id: int) -> Optional[Dict[str, Any]]:
         if isinstance(ch, (str, bytes, bytearray)):
             try:
                 row["chat_history"] = json.loads(ch)
+            except (ValueError, TypeError):
+                pass
+                
+        ufl = row.get("uploaded_files_log")
+        if isinstance(ufl, (str, bytes, bytearray)):
+            try:
+                row["uploaded_files_log"] = json.loads(ufl)
             except (ValueError, TypeError):
                 pass
 
@@ -207,6 +214,7 @@ def create_workspace(
     user_input: Optional[str] = None,
     analysis_data: Optional[Dict[str, Any]] = None,
     chat_history: Optional[List[Dict[str, Any]]] = None,
+    uploaded_files_log: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Create a workspace, enforcing plan-based quota.
 
@@ -218,6 +226,7 @@ def create_workspace(
     size_mb = _coerce_size_mb(analysis_data)
     payload = json.dumps(analysis_data, default=str) if analysis_data is not None else None
     chat_payload = json.dumps(chat_history, default=str) if chat_history is not None else None
+    uploaded_files_payload = json.dumps(uploaded_files_log, default=str) if uploaded_files_log is not None else None
 
     quota_before = get_quota(user_id)
     if quota_before["used"] >= quota_before["allowed"]:
@@ -230,10 +239,10 @@ def create_workspace(
             """
             INSERT INTO workspaces
                 (user_id, name, session_id, process_key, user_input,
-                 analysis_data, chat_history, data_size_mb)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 analysis_data, chat_history, uploaded_files_log, data_size_mb)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (user_id, name, session_id, process_key, user_input, payload, chat_payload, size_mb),
+            (user_id, name, session_id, process_key, user_input, payload, chat_payload, uploaded_files_payload, size_mb),
         )
         new_id = cur.lastrowid
         conn.commit()

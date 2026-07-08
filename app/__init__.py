@@ -25,7 +25,7 @@ def create_app() -> Flask:
     # FRONTEND_ORIGINS accepts a comma-separated list, e.g.:
     #   http://yourdomain.com,https://yourdomain.com,http://192.168.1.10:3000
     # Set to * to allow all origins (not recommended for production).
-    raw_origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://localhost:5173,https://agentforge.services/agentforcex")
+    raw_origins = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://localhost:5173")
     if raw_origins.strip() == "*":
         origins = "*"
     else:

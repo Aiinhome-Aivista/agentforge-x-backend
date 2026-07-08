@@ -195,14 +195,26 @@ def analyze():
                 },
             }
 
+        uploaded_files_log = [{"filename": fname, "size_mb": round(len(fb) / (1024 * 1024), 3)} for fb, fname in file_data]
+
         api_dict = result.to_api()
         api_dict["csv_source_detection"]  = source_target_report["csv_source_detection"]
         api_dict["document_data_lineage"] = source_target_report["document_data_lineage"]
+        api_dict["uploaded_files_log"] = uploaded_files_log
         return jsonify(api_dict), 200
 
     except ValueError as e:
         logger.error(f"Analysis config error: {e}")
-        return jsonify({"error": str(e)}), 400
+        error_str = str(e)
+        if error_str.startswith("IRRELEVANT_FILE|"):
+            parts = error_str.split("|")
+            return jsonify({
+                "status": "error",
+                "error_type": "IRRELEVANT_FILE",
+                "error": parts[1] if len(parts) > 1 else "Irrelevant file.",
+                "recommended_solution": parts[2] if len(parts) > 2 else "Please upload a relevant file."
+            }), 400
+        return jsonify({"error": error_str}), 400
     except Exception as e:
         logger.error(f"Analysis failed: {e}", exc_info=True)
         return jsonify({"error": "Analysis failed. Please try again."}), 500
