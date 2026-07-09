@@ -153,17 +153,21 @@ class AnalysisService:
             primary_file = "web_input.txt"
             primary_source_type = "text"
 
+        # Keep a clean version of just the file text for validation
+        clean_file_text_parts = []
+
         # Parse uploaded files
         if files:
             for file_bytes, filename in files:
                 text, meta = parse_file(file_bytes, filename)
 
                 combined_text_parts.append(f"=== File: {filename} ===\n{text}")
+                clean_file_text_parts.append(f"File: {filename}\n{text}")
                 combined_metadata[filename] = meta
 
                 logger.info(f"Parsed {filename}: {len(text)} chars")
 
-        # Add user input
+        # Add user input to the combined text (used for extraction)
         if user_input:
             combined_text_parts.append(f"=== USER INPUT ===\n{user_input}")
 
@@ -173,6 +177,7 @@ class AnalysisService:
 
         # Final combined text
         combined_text = "\n\n".join(combined_text_parts)
+        clean_file_text = "\n\n".join(clean_file_text_parts)
 
         # Optional instruction wrapper
         if user_input:
@@ -181,8 +186,8 @@ class AnalysisService:
                 f"=== CONTEXT DATA ===\n{combined_text}"
             )
             
-        # 🔥 NEW: Validate Relevance
-        relevance = llm.validate_relevance(user_input, combined_text)
+        # 🔥 NEW: Validate Relevance using ONLY the clean file text
+        relevance = llm.validate_relevance(user_input, clean_file_text)
         if not relevance.get("is_relevant", True):
             error_msg = relevance.get("error", "Irrelevant file.")
             solution = relevance.get("recommended_solution", "Upload a relevant file.")
