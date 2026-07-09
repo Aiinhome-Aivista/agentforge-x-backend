@@ -1482,6 +1482,7 @@ OUTPUT FORMAT (STRICT JSON)
 
 
 def build_architecture_prompt(suggestion, step, process):
+    user_context = str(process.get("raw_text", ""))[:5000] if isinstance(process, dict) else ""
     return f"""
 You are a principal AI platform architect designing a PRODUCTION-DEPLOYABLE agentic system.
 
@@ -1494,6 +1495,13 @@ STRICT RULES:
 
 OBJECTIVE:
 Generate a React Flow architecture that maps directly to deployable infrastructure and services.
+
+--------------------------------------------------
+USER TECHNOLOGY PREFERENCES:
+If the user explicitly mentioned specific technologies, databases, or cloud providers in their input (e.g., MySQL, AWS, Azure, GCP, MongoDB, Oracle), you MUST use those exact technologies for the respective layers instead of the default ones. 
+
+User Context/Input:
+{user_context}
 
 --------------------------------------------------
 CORE DESIGN PRINCIPLES:

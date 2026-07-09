@@ -232,23 +232,27 @@ class MistralClient:
 
     
     def validate_relevance(self, user_input: str, file_text: str) -> Dict:
-        """Check if the uploaded file is relevant to the user's mission/vision/input."""
-        if not user_input.strip():
-            return {"is_relevant": True}
+        """Check if the uploaded file is relevant to business processes or the user's input."""
         
         prompt = f"""
-        User's Mission/Vision and Context:
+        User's Mission/Vision and Context (may be empty):
         {user_input}
         
         Uploaded File Content Preview (first 2000 chars):
         {file_text[:2000]}
         
-        Task: Determine if the uploaded file content is relevant to the user's stated mission/vision. 
-        If it is relevant or if you are unsure, respond with {{"is_relevant": true}}.
-        If it is clearly irrelevant (e.g. they asked for HR onboarding but uploaded a restaurant menu), respond with:
+        Task: Determine if the uploaded file content is relevant for a Process Automation and Analysis tool.
+        The file MUST contain business processes, workflows, standard operating procedures, ERP data, structured tables, or actionable steps for automation.
+        If the user provided a Mission/Vision, the file should also be somewhat relevant to that context.
+        If the file is a personal chat, a poem, random artwork, or clearly irrelevant non-business data, you must reject it.
+        
+        CRITICAL: If the file appears to be an image (e.g. a WhatsApp Image or screenshot) or an image-based PDF, you MUST first provide your detailed explanation of why it is irrelevant, and then ADDITIONALLY append this exact statement: "We cannot understand or extract text/content from images."
+        
+        If it is relevant or if it contains valid business/process data, respond with {{"is_relevant": true}}.
+        If it is clearly irrelevant (e.g. a poem, random chat, or entirely unrelated to business processes, or an image), respond with:
         {{
             "is_relevant": false,
-            "error": "<Exact specific error explaining why it is irrelevant>",
+            "error": "<Detailed explanation of what the file is and why it lacks business processes. If it is an image, you MUST ALSO append the phrase regarding image extraction as instructed above>",
             "recommended_solution": "<A clear tip on what file they should upload instead>"
         }}
         """

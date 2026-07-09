@@ -91,6 +91,16 @@ def sme_ingest():
     try:
         result = ingest_to_base_graph(file_data, user_input=user_input,
                                       session_id=session_id)
+        
+        # Handle early validation failure
+        if result.get("error_type") == "IRRELEVANT_FILE":
+            return jsonify({
+                "status": "error",
+                "error_type": "IRRELEVANT_FILE",
+                "error": result.get("message"),
+                "recommended_solution": result.get("recommended_solution")
+            }), 400
+
         result.setdefault("session_id", session_id)
         return jsonify(result), (200 if result.get("status") == "ok" else 200)
     except Exception as e:

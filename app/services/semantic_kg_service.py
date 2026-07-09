@@ -265,6 +265,20 @@ def ingest_to_base_graph(
         return {"status": "error", "message": "No analyzable input provided.",
                 "session_id": session_id}
 
+    # 🔥 NEW VALIDATION: Reject irrelevant files early before graph building
+    llm = get_mistral_client()
+    relevance = llm.validate_relevance(user_input, combined_text)
+    if not relevance.get("is_relevant", True):
+        error_msg = relevance.get("error", "Irrelevant file.")
+        solution = relevance.get("recommended_solution", "Upload a relevant file.")
+        return {
+            "status": "error",
+            "error_type": "IRRELEVANT_FILE",
+            "message": error_msg,
+            "recommended_solution": solution,
+            "session_id": session_id
+        }
+
     # Pick a representative data_kind for the prompt
     if "erp_dump" in data_kinds or "csv" in data_kinds:
         data_kind = "dataset"
