@@ -1009,7 +1009,7 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             P(es["kpi_table_intro"]),
             TBL(
                 ["Metric", "Baseline", "Target", "Rationale"],
-                [[r["metric"], r["baseline"], r["target"], r["rationale"]] for r in es["kpi_targets"]],
+                [[r.get("metric", ""), r.get("baseline", ""), r.get("target", ""), r.get("rationale", "")] for r in es["kpi_targets"]],
             ),
             H3("Blueprint-to-prototype path"),
             P(es["blueprint_to_prototype_path"]),
@@ -1036,12 +1036,12 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             P(cd["step_selection_intro"]),
             TBL(
                 ["No.", "Step", "Constraint", "Volume", "Repeatability", "Exception cost", "Reversibility", "Decision"],
-                [[r["no"], r["step"], r["constraint"], r["volume"], r["repeatability"], r["exception_cost"], r["reversibility"], r["decision"]] for r in cd["step_selection_rationale"]],
+                [[r.get("no", ""), r.get("step", ""), r.get("constraint", ""), r.get("volume", ""), r.get("repeatability", ""), r.get("exception_cost", ""), r.get("reversibility", ""), r.get("decision", "")] for r in cd["step_selection_rationale"]],
             ),
             H3("KPI baselines vs targets"),
             TBL(
                 ["Metric", "Today", "30-day pilot", "90-day steady"],
-                [[r["metric"], r["today"], r["pilot_30d"], r["steady_90d"]] for r in cd["kpi_baselines_targets"]],
+                [[r.get("metric", ""), r.get("today", ""), r.get("pilot_30d", ""), r.get("steady_90d", "")] for r in cd["kpi_baselines_targets"]],
             ),
             H3("Why one step alone is not enough"),
             P(cd["why_one_step_not_enough"]),
@@ -1057,13 +1057,13 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("Step-by-step ownership map"),
             TBL(
                 ["No.", "Step", "Owner today", "Owner future", "Notes"],
-                [[r["no"], r["step"], r["owner_today"], r["owner_future"], r["notes"]] for r in fs["ownership_map"]],
+                [[r.get("no", ""), r.get("step", ""), r.get("owner_today", ""), r.get("owner_future", ""), r.get("notes", "")] for r in fs["ownership_map"]],
             ),
             H3("Task-level breakdown for in-scope steps"),
             P(fs["task_breakdown_intro"]),
             TBL(
                 ["Step", "Key tasks", "Future owner", "Audit evidence"],
-                [[r["step"], r["tasks"], r["future_owner"], r["audit_evidence"]] for r in fs["task_breakdown"]],
+                [[r.get("step", ""), r.get("tasks", ""), r.get("future_owner", ""), r.get("audit_evidence", "")] for r in fs["task_breakdown"]],
             ),
             H3("What flows are autonomous, and what stays human"),
             P(fs["autonomous_vs_human_intro"]),
@@ -1081,20 +1081,20 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
     sections.append({
         "number": "3",
         "title":  "Architecture",
-        "lead":   ar["lead"],
+        "lead":   ar.get("lead", ""),
         "blocks": [
             H3("Future-state agentic flow"),
-            P(ar["agentic_flow_paragraph"]),
+            P(ar.get("agentic_flow_paragraph", "")),
             H3("Component-level annotation"),
-            *[P(f"**{c['name']}**. {c['description']}") for c in ar["components"]],
+            *[P(f"**{c['name']}**. {c['description']}") for c in ar.get("components", "")],
             H3("Layered technical stack"),
-            P(ar["layered_stack_paragraph"]),
+            P(ar.get("layered_stack_paragraph", "")),
             H3("Pilot vs production data plane"),
             TBL(
                 ["Layer", "Pilot", "Production"],
-                [[r["layer"], r["pilot"], r["production"]] for r in ar["pilot_vs_production"]],
+                [[r.get("layer", ""), r.get("pilot", ""), r.get("production", "")] for r in ar.get("pilot_vs_production", "")],
             ),
-            P(ar["connector_paragraph"]),
+            P(ar.get("connector_paragraph", "")),
         ],
     })
 
@@ -1109,17 +1109,17 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("Roles"),
             TBL(
                 ["Role", "Reports to", "Pilot accountability"],
-                [[r["role"], r["reports_to"], r["pilot_accountability"]] for r in om["roles"]],
+                [[r.get("role", ""), r.get("reports_to", ""), r.get("pilot_accountability", "")] for r in om["roles"]],
             ),
             H3("RACI by future-state step"),
             TBL(
                 ["Step", "Clerk", "Mgr", "Controller", "Vendor Master", "Audit", "Agent"],
-                [[r["step"], r["clerk"], r["manager"], r["controller"], r["vendor_master"], r["audit"], r["agent"]] for r in om["raci_steps"]],
+                [[r.get("step", ""), r.get("clerk", ""), r.get("manager", ""), r.get("controller", ""), r.get("vendor_master", ""), r.get("audit", ""), r.get("agent", "")] for r in om["raci_steps"]],
             ),
             H3("Escalation matrix"),
             TBL(
                 ["Trigger", "First responder", "SLA", "If breached"],
-                [[r["trigger"], r["first_responder"], r["sla"], r["if_breached"]] for r in om["escalation_matrix"]],
+                [[r.get("trigger", ""), r.get("first_responder", ""), r.get("sla", ""), r.get("if_breached", "")] for r in om["escalation_matrix"]],
             ),
             H3("Day-in-the-life — after pilot"),
             P(om["day_in_the_life_paragraph"]),
@@ -1135,18 +1135,18 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("Software components"),
             TBL(
                 ["Component", "Pilot tier", "Production tier", "License", "Cost band (USD/yr)"],
-                [[r["component"], r["pilot_tier"], r["production_tier"], r["license"], r["cost_band"]] for r in bo["software_components"]],
+                [[r.get("component", ""), r.get("pilot_tier", ""), r.get("production_tier", ""), r.get("license", ""), r.get("cost_band", "")] for r in bo["software_components"]],
             ),
             H3("Engagement & people"),
             TBL(
                 ["Role", "Pilot duration", "Steady-state"],
-                [[r["role"], r["pilot_duration"], r["steady_state"]] for r in bo["engagement_people"]],
+                [[r.get("role", ""), r.get("pilot_duration", ""), r.get("steady_state", "")] for r in bo["engagement_people"]],
             ),
             H3("Client technology intake"),
             P(bo["client_tech_intake_intro"]),
             TBL(
                 ["Topic", "Question", "Drives"],
-                [[r["topic"], r["question"], r["drives"]] for r in bo["client_tech_intake"]],
+                [[r.get("topic", ""), r.get("question", ""), r.get("drives", "")] for r in bo["client_tech_intake"]],
             ),
             H3("What is not in the BOM"),
             P(bo["not_in_bom_intro"]),
@@ -1178,7 +1178,7 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("Configuration surface — what the team will actually edit"),
             TBL(
                 ["File", "What lives here", "Owner"],
-                [[r["file"], r["what_lives_here"], r["owner"]] for r in dp["config_surface"]],
+                [[r.get("file", ""), r.get("what_lives_here", ""), r.get("owner", "")] for r in dp["config_surface"]],
             ),
             H3("Gates that block production graduation"),
             P(dp["graduation_gates_intro"]),
@@ -1200,7 +1200,7 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("Model-risk controls"),
             TBL(
                 ["Risk", "Control"],
-                [[r["risk"], r["control"]] for r in gv["model_risk_controls"]],
+                [[r.get("risk", ""), r.get("control", "")] for r in gv["model_risk_controls"]],
             ),
             H3("SOX touchpoints"),
             P(gv["sox_touchpoints_intro"]),
@@ -1227,13 +1227,13 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             H3("What the metrics will show by quarter"),
             TBL(
                 ["Quarter", "Override rate", "Touchless rate", "DPO / cycle", "Exception cycle"],
-                [[r["quarter"], r["override_rate"], r["touchless_rate"], r["dpo_or_cycle"], r["exception_cycle"]] for r in si["metrics_by_quarter"]],
+                [[r.get("quarter", ""), r.get("override_rate", ""), r.get("touchless_rate", ""), r.get("dpo_or_cycle", ""), r.get("exception_cycle", "")] for r in si["metrics_by_quarter"]],
             ),
             H3("Benefits realisation"),
             P(si["benefits_realisation_intro"]),
             TBL(
                 ["KPI", "Owner", "Data source", "Baseline method", "Cadence"],
-                [[r["kpi"], r["owner"], r["data_source"], r["baseline_method"], r["cadence"]] for r in si["benefits_realisation"]],
+                [[r.get("kpi", ""), r.get("owner", ""), r.get("data_source", ""), r.get("baseline_method", ""), r.get("cadence", "")] for r in si["benefits_realisation"]],
             ),
             P(si["financial_impact_paragraph"]),
             P(si["projections_paragraph"]),
@@ -1254,14 +1254,14 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             P(dy["solution_components_intro"]),
             TBL(
                 ["Component", "Role", "Deploys as", "Owner"],
-                [[r["component"], r["role"], r["deploys_as"], r["owner"]] for r in dy["solution_components"]],
+                [[r.get("component", ""), r.get("role", ""), r.get("deploys_as", ""), r.get("owner", "")] for r in dy["solution_components"]],
             ),
 
             H3("9.2 Bill of materials — pilot vs production"),
             P(dy["bom_summary_paragraph"]),
             TBL(
                 ["Layer", "Pilot", "Production"],
-                [[r["layer"], r["pilot"], r["production"]] for r in dy["bom_pilot_vs_production"]],
+                [[r.get("layer", ""), r.get("pilot", ""), r.get("production", "")] for r in dy["bom_pilot_vs_production"]],
             ),
 
             H3("9.3 Step-by-step deployment"),
@@ -1276,14 +1276,14 @@ def _assemble_payload(process_key: str, ctx: Dict[str, Any], data: Dict[str, Any
             P(dy["integration_intro"]),
             TBL(
                 ["System", "Interface", "Direction", "Pilot", "Production"],
-                [[r["system"], r["interface"], r["direction"], r["pilot"], r["production"]] for r in dy["integration_table"]],
+                [[r.get("system", ""), r.get("interface", ""), r.get("direction", ""), r.get("pilot", ""), r.get("production", "")] for r in dy["integration_table"]],
             ),
 
             H3("9.6 Test approach"),
             P(dy["test_intro"]),
             TBL(
                 ["Layer", "What it proves", "Owner", "Gate"],
-                [[r["layer"], r["proves"], r["owner"], r["gate"]] for r in dy["test_layers"]],
+                [[r.get("layer", ""), r.get("proves", ""), r.get("owner", ""), r.get("gate", "")] for r in dy["test_layers"]],
             ),
 
             H3("9.7 Guardrails"),
