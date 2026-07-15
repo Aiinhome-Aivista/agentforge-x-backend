@@ -40,6 +40,7 @@ def list_users(*, q: Optional[str] = None,
             f"""
             SELECT u.id, u.name, u.email, u.country, u.auth_provider,
                    u.email_verified, u.is_active, u.is_admin,
+                   u.llm_tokens_used AS llm_api_used, u.file_size_limit_mb,
                    u.avatar_url, u.created_at,
                    s.plan_code, s.status AS sub_status, s.period_end,
                    s.amount AS sub_amount, s.currency AS sub_currency,
@@ -93,7 +94,7 @@ def count_users(*, q: Optional[str] = None) -> int:
 # ── Create user ─────────────────────────────────────────────────────────────
 def create_user(*, name: str, email: str, password: str,
                 country: str = "IN", is_admin: bool = False,
-                email_verified: bool = True) -> Dict[str, Any]:
+                email_verified: bool = True, file_size_limit_mb: int = 5) -> Dict[str, Any]:
     name = (name or "").strip()
     email = (email or "").strip().lower()
     if len(name) < 2:
@@ -114,17 +115,17 @@ def create_user(*, name: str, email: str, password: str,
             """
             INSERT INTO users
                 (name, email, password, country, auth_provider,
-                 email_verified, is_admin)
-            VALUES (%s, %s, %s, %s, 'email', %s, %s)
+                 email_verified, is_admin, file_size_limit_mb)
+            VALUES (%s, %s, %s, %s, 'email', %s, %s, %s)
             """,
             (name, email, hash_password(password), country[:8],
-             1 if email_verified else 0, 1 if is_admin else 0),
+             1 if email_verified else 0, 1 if is_admin else 0, file_size_limit_mb),
         )
         conn.commit()
         new_id = cur.lastrowid
         cur.execute(
             "SELECT id, name, email, country, is_admin, is_active, "
-            "email_verified, auth_provider, created_at "
+            "email_verified, auth_provider, created_at, file_size_limit_mb "
             "FROM users WHERE id=%s",
             (new_id,),
         )
@@ -139,8 +140,8 @@ def create_user(*, name: str, email: str, password: str,
 
 # ── Update / delete ─────────────────────────────────────────────────────────
 def update_user(user_id: int, **fields) -> Optional[Dict[str, Any]]:
-    """Permitted fields: is_active, is_admin, name, country."""
-    permitted = ("is_active", "is_admin", "name", "country")
+    """Permitted fields: is_active, is_admin, name, country, file_size_limit_mb."""
+    permitted = ("is_active", "is_admin", "name", "country", "file_size_limit_mb")
     sets: List[str] = []
     args: List[Any] = []
     for k in permitted:
@@ -220,12 +221,20 @@ def get_user(user_id: int) -> Optional[Dict[str, Any]]:
             """
             SELECT id, name, email, country, auth_provider,
                    email_verified, is_active, is_admin,
+                   llm_tokens_used AS llm_api_used, file_size_limit_mb,
                    avatar_url, created_at, updated_at
               FROM users WHERE id=%s
             """,
             (user_id,),
         )
-        return cur.fetchone()
+        user = cur.fetchone()
+        if user:
+            cur.execute(
+                "SELECT filename, size_mb, created_at FROM user_uploaded_files WHERE user_id=%s ORDER BY created_at DESC",
+                (user_id,)
+            )
+            user["uploaded_files"] = cur.fetchall() or []
+        return user
     finally:
         cur.close()
         conn.close()

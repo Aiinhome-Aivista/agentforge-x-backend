@@ -34,8 +34,10 @@ from __future__ import annotations
 import os
 import uuid
 import logging
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from werkzeug.utils import secure_filename
+from app.db.db_connection import get_mysql_connection
+from app.services.auth_helpers import require_auth
 
 from app.services.semantic_kg_service import (
     ingest_to_base_graph,
@@ -55,7 +57,7 @@ sme_bp = Blueprint("sme", __name__)
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt", "csv", "xlsx", "xls",
                       "eml", "log", "md", "json"}
 MAX_FILES = 20
-MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 50))
+MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 5))
 
 
 def _allowed(filename: str) -> bool:
@@ -63,32 +65,65 @@ def _allowed(filename: str) -> bool:
 
 
 @sme_bp.post("/sme/ingest")
+@require_auth
 def sme_ingest():
     session_id = request.form.get("session_id") or str(uuid.uuid4())
     user_input = (request.form.get("user_input") or "").strip()
     uploaded = request.files.getlist("files") if "files" in request.files else []
 
     if not uploaded and not user_input:
-        return jsonify({"status": "error", "message": "No input provided",
-                        "session_id": session_id}), 400
+        return jsonify({"error": "No input provided", "session_id": session_id}), 400
     if uploaded and len(uploaded) > MAX_FILES:
-        return jsonify({"status": "error",
-                        "message": f"Maximum {MAX_FILES} files allowed"}), 400
+        return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
+
+    file_size_limit_mb = MAX_SIZE_MB
+    if hasattr(g, 'user') and g.user and g.user.get('uid'):
+        uid = g.user.get('uid')
+        try:
+            conn = get_mysql_connection()
+            with conn.cursor(dictionary=True) as cur:
+                cur.execute("SELECT file_size_limit_mb FROM users WHERE id = %s", (uid,))
+                u = cur.fetchone()
+                if u and u.get('file_size_limit_mb') is not None:
+                    file_size_limit_mb = float(u['file_size_limit_mb'])
+            conn.close()
+        except Exception as e:
+            logger.error(f"User limit check error: {e}")
 
     file_data = []
+    total_size_mb = 0
     for f in uploaded:
         if not f or not f.filename:
             continue
         if not _allowed(f.filename):
-            return jsonify({"status": "error",
-                            "message": f"File type not allowed: {f.filename}"}), 400
+            return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
         blob = f.read()
-        if len(blob) / (1024 * 1024) > MAX_SIZE_MB:
-            return jsonify({"status": "error",
-                            "message": f"File too large: {f.filename}"}), 400
+        size_mb = len(blob) / (1024 * 1024)
+        total_size_mb += size_mb
         file_data.append((blob, secure_filename(f.filename)))
 
+    logger.error(f"[SME_INGEST] total_size_mb={total_size_mb}, limit={file_size_limit_mb}")
+    if total_size_mb > file_size_limit_mb:
+        return jsonify({"error": f"Total upload size ({total_size_mb:.1f}MB) exceeds your limit of {file_size_limit_mb:.1f}MB."}), 400
+
     try:
+        # ── NEW: log uploaded files to the user ──
+        if file_data and hasattr(g, 'user') and g.user and g.user.get('uid'):
+            uid = g.user.get('uid')
+            try:
+                conn = get_mysql_connection()
+                with conn.cursor() as cur:
+                    for fb, fname in file_data:
+                        size_mb = len(fb) / (1024 * 1024)
+                        cur.execute(
+                            "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                            (uid, fname, size_mb)
+                        )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error logging uploaded files: {e}")
+
         result = ingest_to_base_graph(file_data, user_input=user_input,
                                       session_id=session_id)
         

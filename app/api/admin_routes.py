@@ -73,6 +73,7 @@ def admin_create_user():
             country        = (body.get("country") or "IN"),
             is_admin       = bool(body.get("is_admin", False)),
             email_verified = bool(body.get("email_verified", True)),
+            file_size_limit_mb = int(body.get("file_size_limit_mb", 50))
         )
     except ValueError as ve:
         return _err(str(ve), 400)
@@ -98,7 +99,7 @@ def admin_get_user(uid):
 def admin_update_user(uid):
     body = request.get_json(silent=True) or {}
     # Only forward whitelisted fields. The service layer also enforces this.
-    permitted = {k: body[k] for k in ("is_active", "is_admin", "name", "country")
+    permitted = {k: body[k] for k in ("is_active", "is_admin", "name", "country", "file_size_limit_mb")
                  if k in body}
     try:
         u = admin_service.update_user(uid, **permitted)

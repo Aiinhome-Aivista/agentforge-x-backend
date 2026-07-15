@@ -34,6 +34,8 @@ from app.api.chatbot_routes import chatbot_bp                # ⬅️ NEW
 from app.api.code_generation_routes import code_gen_bp       # ⬅️ NEW
 from app.api.blueprint_export_routes import blueprint_export_bp  # ⬅️ NEW (blueprint export API)
 from app.api.sme_routes import sme_bp                          # ⬅️ NEW (SME-driven workflow)
+from app.services.auth_helpers import require_auth, current_user
+from flask import g
 
 from app.services.source_detector_service import (             # ⬅️ NEW
     build_source_target_report,
@@ -61,7 +63,7 @@ register_auth_gate(api_bp)
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"}
 MAX_FILES = 20
-MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 50))
+MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 5))
 
 simulation_service = SimulationService()
 
@@ -118,10 +120,27 @@ def login():
 
 # ── Upload & Analyze ──────────────────────────────────────────────────────────
 @api_bp.post("/analyze")
+@require_auth
 def analyze():
     session_id = request.form.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
+        
+    # Fetch user file size limit
+    file_size_limit_mb = MAX_SIZE_MB
+    if hasattr(g, 'user') and g.user and g.user.get('uid'):
+        uid = g.user.get('uid')
+        conn = get_mysql_connection()
+        try:
+            with conn.cursor(dictionary=True) as cur:
+                cur.execute("SELECT file_size_limit_mb FROM users WHERE id = %s", (uid,))
+                u = cur.fetchone()
+                if u and u.get('file_size_limit_mb'):
+                    file_size_limit_mb = float(u['file_size_limit_mb'])
+        except Exception as e:
+            logger.error(f"User limit check error: {e}")
+        finally:
+            conn.close()
 
     user_input = request.form.get("user_input", "").strip()
     mission_vision = request.form.get("mission_vision_context", "").strip()
@@ -136,6 +155,7 @@ def analyze():
         return jsonify({"error": f"Maximum {MAX_FILES} files allowed"}), 400
 
     file_data = []
+    total_size_mb = 0
     for f in uploaded:
         if not f or not f.filename:
             continue
@@ -143,14 +163,33 @@ def analyze():
             return jsonify({"error": f"File type not allowed: {f.filename}"}), 400
         file_bytes = f.read()
         size_mb = len(file_bytes) / (1024 * 1024)
-        if size_mb > MAX_SIZE_MB:
-            return jsonify({"error": f"File too large: {f.filename} ({size_mb:.1f}MB)"}), 400
+        total_size_mb += size_mb
         file_data.append((file_bytes, secure_filename(f.filename)))
+
+    if total_size_mb > file_size_limit_mb:
+        return jsonify({"error": f"Total upload size ({total_size_mb:.1f}MB) exceeds your limit of {file_size_limit_mb:.1f}MB."}), 400
 
     if not file_data and not user_input:
         return jsonify({"error": "No valid input found"}), 400
 
     try:
+        # ── NEW: log uploaded files to the user ──
+        if file_data and hasattr(g, 'user') and g.user and g.user.get('uid'):
+            uid = g.user.get('uid')
+            try:
+                conn = get_mysql_connection()
+                with conn.cursor() as cur:
+                    for fb, fname in file_data:
+                        size_mb = len(fb) / (1024 * 1024)
+                        cur.execute(
+                            "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                            (uid, fname, size_mb)
+                        )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Error logging uploaded files: {e}")
+
         result = analysis_service.analyze(
             file_data,
             user_input=user_input,

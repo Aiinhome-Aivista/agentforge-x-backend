@@ -178,6 +178,9 @@ def signup_verify_otp():
             "country": user.get("country", "IN"),
             "avatar_url": user.get("avatar_url"),
             "plan": plan,
+            "is_admin": user.get("is_admin", 0),
+            "available_tokens": user.get("available_tokens", 0),
+            "total_tokens": user.get("total_tokens", 0),
         })
     except Exception as e:
         conn.rollback()
@@ -219,6 +222,9 @@ def signin():
             "country": user.get("country", "IN"),
             "avatar_url": user.get("avatar_url"),
             "plan": plan,
+            "is_admin": user.get("is_admin", 0),
+            "available_tokens": user.get("available_tokens", 0),
+            "total_tokens": user.get("total_tokens", 0),
         })
     except Exception as e:
         logger.error("signin error: %s", e, exc_info=True)
@@ -277,6 +283,9 @@ def google_signin():
             "country": user.get("country", "IN"),
             "avatar_url": user.get("avatar_url"),
             "plan": plan,
+            "is_admin": user.get("is_admin", 0),
+            "available_tokens": user.get("available_tokens", 0),
+            "total_tokens": user.get("total_tokens", 0),
         })
     except Exception as e:
         conn.rollback()
@@ -336,9 +345,10 @@ def me():
     conn = get_mysql_connection()
     cur = conn.cursor(dictionary=True)
     try:
-        cur.execute("SELECT id, name, email, country, avatar_url, "
-                    "auth_provider, email_verified, created_at "
-                    "FROM users WHERE id=%s", (uid,))
+        cur.execute(
+            "SELECT id, name, email, avatar_url, country, "
+            "auth_provider, email_verified, created_at, is_admin "
+            "FROM users WHERE id=%s", (uid,))
         u = cur.fetchone()
         if not u:
             return _err("User not found", 404)

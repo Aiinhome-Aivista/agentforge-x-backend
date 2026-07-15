@@ -84,6 +84,32 @@ class MistralClient:
                     **kwargs
                 )
                 content = response.choices[0].message.content
+                
+                # Deduct token usage if available and user is authenticated
+                try:
+                    from flask import g, has_request_context
+                    from app.db.db_connection import get_mysql_connection
+                    
+                    if has_request_context() and hasattr(g, 'user') and g.user and g.user.get('uid'):
+                        uid = g.user.get('uid')
+                        tokens_used = 0
+                        if hasattr(response, 'usage') and response.usage:
+                            tokens_used = getattr(response.usage, 'total_tokens', 0)
+                            
+                        if tokens_used > 0:
+                            conn = get_mysql_connection()
+                            try:
+                                with conn.cursor() as cur:
+                                    cur.execute(
+                                        "UPDATE users SET llm_tokens_used = llm_tokens_used + %s WHERE id = %s",
+                                        (tokens_used, uid)
+                                    )
+                                conn.commit()
+                            finally:
+                                conn.close()
+                except Exception as e:
+                    logger.error(f"Failed to deduct token usage: {e}")
+                    
                 # Some local backends return null content instead of a string.
                 # Coerce to "" so downstream _parse_json degrades gracefully
                 # instead of raising on None.strip().
