@@ -44,7 +44,8 @@ def list_users(*, q: Optional[str] = None,
                    u.avatar_url, u.created_at,
                    s.plan_code, s.status AS sub_status, s.period_end,
                    s.amount AS sub_amount, s.currency AS sub_currency,
-                   s.extra_workspaces
+                   s.extra_workspaces,
+                   IFNULL(f.used_storage_mb, 0) as used_storage_mb
               FROM users u
               LEFT JOIN (
                 SELECT s1.*
@@ -56,6 +57,11 @@ def list_users(*, q: Optional[str] = None,
                      GROUP BY user_id
                   ) m ON m.max_id = s1.id
               ) s ON s.user_id = u.id
+              LEFT JOIN (
+                SELECT user_id, SUM(size_mb) as used_storage_mb
+                  FROM user_uploaded_files
+                 GROUP BY user_id
+              ) f ON f.user_id = u.id
             {where}
              ORDER BY u.created_at DESC, u.id DESC
              LIMIT %s OFFSET %s
@@ -129,7 +135,15 @@ def create_user(*, name: str, email: str, password: str,
             "FROM users WHERE id=%s",
             (new_id,),
         )
-        return cur.fetchone()
+        created_user = cur.fetchone()
+        
+        try:
+            from app.services.email_service import send_welcome_email
+            send_welcome_email(email, name, password, file_size_limit_mb)
+        except Exception as email_ex:
+            logger.error(f"Failed to send welcome email to {email}: {email_ex}")
+            
+        return created_user
     except Exception:
         conn.rollback()
         raise
@@ -238,6 +252,21 @@ def get_user(user_id: int) -> Optional[Dict[str, Any]]:
     finally:
         cur.close()
         conn.close()
+
+def reset_user_storage(user_id: int) -> bool:
+    conn = get_mysql_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM user_uploaded_files WHERE user_id=%s", (user_id,))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
 
 
 # ── Subscription overview ───────────────────────────────────────────────────

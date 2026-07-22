@@ -116,9 +116,14 @@ def sme_ingest():
                     for fb, fname in file_data:
                         size_mb = len(fb) / (1024 * 1024)
                         cur.execute(
-                            "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                            "SELECT id FROM user_uploaded_files WHERE user_id=%s AND filename=%s AND ABS(size_mb - %s) < 0.01 AND created_at >= NOW() - INTERVAL 10 MINUTE LIMIT 1",
                             (uid, fname, size_mb)
                         )
+                        if not cur.fetchone():
+                            cur.execute(
+                                "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                                (uid, fname, size_mb)
+                            )
                 conn.commit()
                 conn.close()
             except Exception as e:

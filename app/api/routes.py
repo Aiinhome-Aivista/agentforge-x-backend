@@ -126,8 +126,8 @@ def analyze():
     if not session_id:
         session_id = str(uuid.uuid4())
         
-    # Fetch user file size limit
     file_size_limit_mb = MAX_SIZE_MB
+    used_file_size_mb = 0.0
     if hasattr(g, 'user') and g.user and g.user.get('uid'):
         uid = g.user.get('uid')
         conn = get_mysql_connection()
@@ -137,6 +137,11 @@ def analyze():
                 u = cur.fetchone()
                 if u and u.get('file_size_limit_mb'):
                     file_size_limit_mb = float(u['file_size_limit_mb'])
+                
+                cur.execute("SELECT COALESCE(SUM(size_mb), 0) as total_used FROM user_uploaded_files WHERE user_id = %s", (uid,))
+                used_row = cur.fetchone()
+                if used_row:
+                    used_file_size_mb = float(used_row['total_used'])
         except Exception as e:
             logger.error(f"User limit check error: {e}")
         finally:
@@ -166,8 +171,9 @@ def analyze():
         total_size_mb += size_mb
         file_data.append((file_bytes, secure_filename(f.filename)))
 
-    if total_size_mb > file_size_limit_mb:
-        return jsonify({"error": f"Total upload size ({total_size_mb:.1f}MB) exceeds your limit of {file_size_limit_mb:.1f}MB."}), 400
+    if total_size_mb > 0 and (used_file_size_mb + total_size_mb) > file_size_limit_mb:
+        remaining_mb = max(0, file_size_limit_mb - used_file_size_mb)
+        return jsonify({"error": f"Upload size ({total_size_mb:.2f}MB) exceeds your remaining limit of {remaining_mb:.2f}MB (Used: {used_file_size_mb:.2f}MB / {file_size_limit_mb:.2f}MB)."}), 400
 
     if not file_data and not user_input:
         return jsonify({"error": "No valid input found"}), 400
@@ -182,9 +188,14 @@ def analyze():
                     for fb, fname in file_data:
                         size_mb = len(fb) / (1024 * 1024)
                         cur.execute(
-                            "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                            "SELECT id FROM user_uploaded_files WHERE user_id=%s AND filename=%s AND ABS(size_mb - %s) < 0.01 AND created_at >= NOW() - INTERVAL 10 MINUTE LIMIT 1",
                             (uid, fname, size_mb)
                         )
+                        if not cur.fetchone():
+                            cur.execute(
+                                "INSERT INTO user_uploaded_files (user_id, filename, size_mb) VALUES (%s, %s, %s)",
+                                (uid, fname, size_mb)
+                            )
                 conn.commit()
                 conn.close()
             except Exception as e:

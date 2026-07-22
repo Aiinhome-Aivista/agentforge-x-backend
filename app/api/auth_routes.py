@@ -57,6 +57,36 @@ def _active_plan(cur, user_id: int):
     return row["plan_code"] if row else None
 
 
+def _enrich_user_data(cur, user_dict):
+    try:
+        uid = user_dict["id"]
+        MAX_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", 5))
+        
+        # We fetch it again since not all endpoints select all columns, 
+        # but some do. We'll just safely fetch it if missing.
+        limit = user_dict.get("file_size_limit_mb")
+        if limit is None:
+            cur.execute("SELECT file_size_limit_mb FROM users WHERE id=%s", (uid,))
+            r = cur.fetchone()
+            limit = float(r["file_size_limit_mb"]) if r and r.get("file_size_limit_mb") else MAX_SIZE_MB
+        else:
+            limit = float(limit) if limit else MAX_SIZE_MB
+            
+        cur.execute("SELECT COALESCE(SUM(size_mb), 0) as total_used FROM user_uploaded_files WHERE user_id=%s", (uid,))
+        used_row = cur.fetchone()
+        used = float(used_row["total_used"]) if used_row else 0.0
+        
+        return {
+            "file_size_limit_mb": limit,
+            "used_file_size_mb": used
+        }
+    except Exception as e:
+        logger.error(f"Error enriching user data: {e}")
+        return {
+            "file_size_limit_mb": int(os.getenv("MAX_UPLOAD_SIZE_MB", 5)),
+            "used_file_size_mb": 0.0
+        }
+
 # ── Signup: send OTP ────────────────────────────────────────────────────────
 @auth_bp.post("/signup/request-otp")
 def signup_request_otp():
@@ -173,6 +203,7 @@ def signup_verify_otp():
         plan = _active_plan(cur, user["id"]) or None
 
         token = jwt_service.issue(user["id"], user["email"], user["name"], plan)
+        quota_data = _enrich_user_data(cur, user)
         return _ok("Account verified", token=token, data={
             "id": user["id"], "name": user["name"], "email": user["email"],
             "country": user.get("country", "IN"),
@@ -181,6 +212,7 @@ def signup_verify_otp():
             "is_admin": user.get("is_admin", 0),
             "available_tokens": user.get("available_tokens", 0),
             "total_tokens": user.get("total_tokens", 0),
+            **quota_data
         })
     except Exception as e:
         conn.rollback()
@@ -217,6 +249,7 @@ def signin():
 
         plan = _active_plan(cur, user["id"]) or None
         token = jwt_service.issue(user["id"], user["email"], user["name"], plan)
+        quota_data = _enrich_user_data(cur, user)
         return _ok("Signed in", token=token, data={
             "id": user["id"], "name": user["name"], "email": user["email"],
             "country": user.get("country", "IN"),
@@ -225,6 +258,7 @@ def signin():
             "is_admin": user.get("is_admin", 0),
             "available_tokens": user.get("available_tokens", 0),
             "total_tokens": user.get("total_tokens", 0),
+            **quota_data
         })
     except Exception as e:
         logger.error("signin error: %s", e, exc_info=True)
@@ -278,6 +312,7 @@ def google_signin():
 
         plan = _active_plan(cur, user["id"]) or None
         token = jwt_service.issue(user["id"], user["email"], user["name"], plan)
+        quota_data = _enrich_user_data(cur, user)
         return _ok("Signed in with Google", token=token, data={
             "id": user["id"], "name": user["name"], "email": user["email"],
             "country": user.get("country", "IN"),
@@ -286,6 +321,7 @@ def google_signin():
             "is_admin": user.get("is_admin", 0),
             "available_tokens": user.get("available_tokens", 0),
             "total_tokens": user.get("total_tokens", 0),
+            **quota_data
         })
     except Exception as e:
         conn.rollback()
@@ -347,13 +383,14 @@ def me():
     try:
         cur.execute(
             "SELECT id, name, email, avatar_url, country, "
-            "auth_provider, email_verified, created_at, is_admin "
+            "auth_provider, email_verified, created_at, is_admin, file_size_limit_mb "
             "FROM users WHERE id=%s", (uid,))
         u = cur.fetchone()
         if not u:
             return _err("User not found", 404)
         plan = _active_plan(cur, uid)
-        return _ok("OK", data={**u, "plan": plan})
+        quota_data = _enrich_user_data(cur, u)
+        return _ok("OK", data={**u, "plan": plan, **quota_data})
     finally:
         cur.close(); conn.close()
 

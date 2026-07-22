@@ -111,6 +111,19 @@ def admin_update_user(uid):
     return _ok("User updated", data=u)
 
 
+@admin_bp.post("/users/<int:uid>/reset_storage")
+@require_auth
+@require_admin
+def admin_reset_user_storage(uid):
+    try:
+        admin_service.reset_user_storage(uid)
+    except Exception as e:
+        logger.error("admin_reset_user_storage failed: %s", e, exc_info=True)
+        return _err("Could not reset storage", 500)
+    return _ok("Storage reset")
+
+
+
 @admin_bp.delete("/users/<int:uid>")
 @require_auth
 @require_admin
@@ -142,3 +155,34 @@ def admin_subscriptions():
         status=status, plan_code=plan_code, limit=limit,
     )
     return _ok("OK", data=data)
+
+
+# -- LLM Settings -----------------------------------------------------------
+from app.services.settings_service import get_all_settings, update_settings, get_llm_change_logs
+
+@admin_bp.get('/settings')
+@require_auth
+@require_admin
+def admin_get_settings():
+    settings = get_all_settings()
+    logs = get_llm_change_logs()
+    return _ok('OK', data={'settings': settings, 'logs': logs})
+
+@admin_bp.post('/settings')
+@require_auth
+@require_admin
+def admin_update_settings():
+    body = request.get_json(silent=True) or {}
+    updates = {}
+    for k in ['LLM_PROVIDER', 'LLM_MODEL_NAME', 'LLM_API_KEY', 'LLM_BASE_URL']:
+        if k in body:
+            updates[k] = body[k]
+    
+    try:
+        update_settings(g.user['uid'], updates)
+    except Exception as e:
+        logger.error(f'Failed to update settings: {e}')
+        return _err('Could not update settings', 500)
+    
+    return _ok('Settings updated')
+
