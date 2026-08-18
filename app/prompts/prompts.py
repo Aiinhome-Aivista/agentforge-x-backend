@@ -72,7 +72,9 @@ def build_extraction_prompt(text: str, source_type: str, file_name: str) -> str:
         "erp_dump": "an ERP system data export (Excel/CSV)",
     }.get(source_type, "a business document")
 
-    return f"""Analyze the following content from {source_context} named "{file_name}".
+    return f"""Analyze the following content from {source_context} (Uploaded files: {file_name}).
+
+Note: The content may contain multiple files separated by '=== File: <filename> ===' headers. You MUST pay attention to these headers to accurately identify which file each piece of data or module comes from.
 
 Extract the complete business process described or implied by this data.
 
@@ -142,8 +144,9 @@ Return a JSON object with this exact structure:
     {{
       "module_name": "string",
       "description": "string",
-      "tables_identified": ["list of table/entity names found"],
-      "fields_identified": ["list of field names found"]
+      "source_file": "string - name of the uploaded file this module primarily relates to",
+      "tables_identified": ["list of EXACT table/entity names found (e.g. 'T001', 'EBAN'). Do NOT include descriptions or definitions. Also include implicit upstream tables if the data is downstream of the process"],
+      "fields_identified": ["list of EXACT field names found (e.g. 'BUKRS', 'MANDT'). Do NOT include descriptions or definitions."]
     }}
   ],
   "key_insights": [

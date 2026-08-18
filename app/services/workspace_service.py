@@ -309,7 +309,7 @@ def update_chat_history(user_id: int, workspace_id: int, chat_history: List[Dict
             (chat_payload, workspace_id, user_id),
         )
         conn.commit()
-        return cur.rowcount > 0
+        return cur.rowcount >= 0
     except Exception:
         conn.rollback()
         raise
@@ -318,19 +318,25 @@ def update_chat_history(user_id: int, workspace_id: int, chat_history: List[Dict
         conn.close()
 
 
-def update_workspace_analysis(user_id: int, workspace_id: int, analysis_data: Dict[str, Any]) -> bool:
+def update_workspace_analysis(user_id: int, workspace_id: int, analysis_data: Dict[str, Any], silent: bool = False) -> bool:
     """Updates the analysis_data for a specific workspace (used when re-analyzing)."""
     payload = json.dumps(analysis_data, default=str) if analysis_data is not None else None
     size_mb = _coerce_size_mb(analysis_data)
     conn = get_mysql_connection()
     cur = conn.cursor()
     try:
-        cur.execute(
-            "UPDATE workspaces SET analysis_data=%s, data_size_mb=%s WHERE id=%s AND user_id=%s",
-            (payload, size_mb, workspace_id, user_id),
-        )
+        if silent:
+            cur.execute(
+                "UPDATE workspaces SET analysis_data=%s, data_size_mb=%s, updated_at=updated_at WHERE id=%s AND user_id=%s",
+                (payload, size_mb, workspace_id, user_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE workspaces SET analysis_data=%s, data_size_mb=%s WHERE id=%s AND user_id=%s",
+                (payload, size_mb, workspace_id, user_id),
+            )
         conn.commit()
-        return cur.rowcount > 0
+        return cur.rowcount >= 0
     except Exception:
         conn.rollback()
         raise

@@ -31,9 +31,15 @@ logger = logging.getLogger(__name__)
 # pipeline produced nothing.  Keyed by "tag" used in step text.
 # ─────────────────────────────────────────────────────────────────────────────
 _MODULE_SEEDS: Dict[str, Dict[str, Any]] = {
+    "requisition": {
+        "module_name":       "Purchase Requisition Management",
+        "description":       "Handles internal requests for materials and services.",
+        "entities":          ["EBAN", "EBKN"],
+        "typical_source":    "SAP MM",
+    },
     "procurement": {
         "module_name":       "Procurement / Materials Management",
-        "description":       "Handles purchase requisitions, vendor master, and PO lifecycle.",
+        "description":       "Handles vendor master and PO lifecycle.",
         "entities":          ["EKKO", "EKPO", "LFA1", "T024E"],
         "typical_source":    "SAP MM",
     },
@@ -83,7 +89,8 @@ _MODULE_SEEDS: Dict[str, Dict[str, Any]] = {
 
 
 _TAG_KEYWORDS = {
-    "procurement": ["procure", "purchase", "vendor", "supplier", "po ", "requisition"],
+    "requisition": ["requisition", "purchase request"],
+    "procurement": ["procure", "purchase", "vendor", "supplier", "po ", "purchase order"],
     "finance":     ["invoice", "payment", "ledger", "accounting", "credit", "ap ", "ar "],
     "sales":       ["sales order", "sales", "quote", "customer order", "billing"],
     "inventory":   ["inventory", "stock", "warehouse", "goods receipt", "gr "],
@@ -219,15 +226,19 @@ For EACH seed module above, return an enriched description, 3-5
 `responsibilities`, and one `data_flow_notes` sentence describing how it
 participates in the process.
 
+CRITICAL: If a seed module seems semantically mismatched with the Process (e.g., downstream Purchase Order tables like EKKO/EKPO being used as the source for an upstream Purchase Requisition process), you MUST explicitly explain this in `data_flow_notes`. For example, explain how the process is inferred from these downstream documents, or mention the missing upstream tables (like EBAN) that normally handle this. Do not present downstream tables as the primary source without qualification.
+
+CRITICAL: The `entities` array MUST contain EXACT table/entity names only (e.g. "T001", "EBAN"). Do NOT include any descriptions, definitions, or dashes (e.g. do NOT write "T001 - Company Code").
+
 Return ONLY a JSON array — no markdown, no commentary:
 [
   {{
     "module_name":       "<same as seed>",
     "description":       "<2-sentence enriched description>",
-    "entities":          ["<entity-1>","<entity-2>", ...],
+    "entities":          ["<exact-table-name-only>","<exact-table-name-only>", ...],
     "source_system":     "<carry through from seed if not detected>",
     "responsibilities":  ["<r1>","<r2>","<r3>"],
-    "data_flow_notes":   "<one sentence>",
+    "data_flow_notes":   "<one sentence explaining data flow, qualifying any mismatched tables>",
     "context_origin":    "AI-enriched from uploaded content"
   }}
 ]

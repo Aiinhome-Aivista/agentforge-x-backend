@@ -174,12 +174,13 @@ def update_workspace_analysis(ws_id: int):
     uid = g.user["uid"]
     body = request.get_json(silent=True) or {}
     analysis = body.get("analysis")
+    silent = body.get("silent", False)
     
     if analysis is None:
         return _err("Field 'analysis' is required", 400)
         
     try:
-        updated = workspace_service.update_workspace_analysis(uid, ws_id, analysis)
+        updated = workspace_service.update_workspace_analysis(uid, ws_id, analysis, silent=silent)
         if not updated:
             return _err("Workspace not found", 404)
         return _ok("Analysis data updated")

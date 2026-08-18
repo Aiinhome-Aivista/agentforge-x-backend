@@ -147,8 +147,8 @@ class AnalysisService:
 
         # Detect primary source
         if files:
-            primary_file = files[0][1]
-            primary_source_type = detect_source_type(primary_file)
+            primary_file = ", ".join(f[1] for f in files)
+            primary_source_type = detect_source_type(files[0][1])
         else:
             primary_file = "web_input.txt"
             primary_source_type = "text"
@@ -474,7 +474,7 @@ class AnalysisService:
                 process_key=process_doc._key,
                 module_name=raw.get("module_name", ""),
                 erp_system=erp_system or "Unknown",
-                source_file=primary_file,
+                source_file=raw.get("source_file") or primary_file,
                 description=raw.get("description", ""),
                 tables_identified=raw.get("tables_identified", []),
                 fields_identified=raw.get("fields_identified", []),
